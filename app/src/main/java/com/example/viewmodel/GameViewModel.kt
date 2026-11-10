@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.audio.HapticEffect
 import com.example.audio.SoundManager
 import com.example.data.GamePreferences
 import com.example.model.BlockShape
@@ -11,12 +12,22 @@ import com.example.model.GameState
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/**
+ * GameViewModel manages the 8x8 grid state (2D matrix/array), score tracking,
+ * active piece pool, placement validation (canPlaceShape), and game over detection (checkGameOver).
+ */
 class GameViewModel(
     private val context: Context,
     val soundManager: SoundManager,
@@ -26,12 +37,60 @@ class GameViewModel(
     private val _gameState = MutableStateFlow(GameState())
     val gameState: StateFlow<GameState> = _gameState.asStateFlow()
 
+    // Observable individual score flows
+    val score: StateFlow<Int> = _gameState.map { it.score }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    val highScore: StateFlow<Int> = _gameState.map { it.highScore }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, preferences.highScore)
+
+    // Haptic feedback event stream
+    private val _hapticEvent = MutableSharedFlow<HapticEffect>(extraBufferCapacity = 16)
+    val hapticEvent: SharedFlow<HapticEffect> = _hapticEvent.asSharedFlow()
+
+    // Tutorial overlay state (shown automatically on first launch)
+    private val _showTutorial = MutableStateFlow(!preferences.hasSeenTutorial)
+    val showTutorial: StateFlow<Boolean> = _showTutorial.asStateFlow()
+
+    fun dismissTutorial() {
+        preferences.hasSeenTutorial = true
+        _showTutorial.value = false
+    }
+
+    fun openTutorial() {
+        _showTutorial.value = true
+    }
+
+    val isHapticsEnabled: Boolean
+        get() = soundManager.isHapticsEnabled
+
+    fun triggerHaptic(effect: HapticEffect) {
+        if (isHapticsEnabled) {
+            _hapticEvent.tryEmit(effect)
+        }
+    }
+
     init {
         soundManager.isSoundEnabled = preferences.isSoundEnabled
         soundManager.isHapticsEnabled = preferences.isHapticsEnabled
         startNewGame()
     }
 
+    /**
+     * Returns the current 8x8 grid state as a 2D IntArray [Array<IntArray>].
+     */
+    fun getGridAs2DArray(): Array<IntArray> {
+        val currentGrid = _gameState.value.grid
+        return Array(8) { r ->
+            IntArray(8) { c ->
+                currentGrid.getOrNull(r)?.getOrNull(c) ?: 0
+            }
+        }
+    }
+
+    /**
+     * Initializes a new game with an empty 8x8 grid and 3 random shapes.
+     */
     fun startNewGame() {
         val initialShapes = ShapeDefinitions.getRandomShapeBatch()
         val high = preferences.highScore
@@ -76,6 +135,7 @@ class GameViewModel(
         val currentPiece = index?.let { _gameState.value.activePieces.getOrNull(it) }
         if (currentPiece != null) {
             soundManager.playPickup()
+            triggerHaptic(HapticEffect.Pickup)
         }
         _gameState.update {
             it.copy(
@@ -87,6 +147,18 @@ class GameViewModel(
         }
     }
 
+    /**
+     * Validates whether [shape] can be placed at ([startRow], [startCol])
+     * on the current active 8x8 grid.
+     */
+    fun canPlaceShape(shape: BlockShape, startRow: Int, startCol: Int): Boolean {
+        return canPlaceShape(_gameState.value.grid, shape, startRow, startCol)
+    }
+
+    /**
+     * Validates whether [shape] can be placed at ([startRow], [startCol])
+     * on the provided 2D list grid.
+     */
     fun canPlaceShape(
         grid: List<List<Int>>,
         shape: BlockShape,
@@ -110,6 +182,35 @@ class GameViewModel(
         return true
     }
 
+    /**
+     * Overload for canPlaceShape using a 2D Array (Array<IntArray>).
+     */
+    fun canPlaceShape(
+        grid: Array<IntArray>,
+        shape: BlockShape,
+        startRow: Int,
+        startCol: Int
+    ): Boolean {
+        for (r in 0 until shape.height) {
+            for (c in 0 until shape.width) {
+                if (shape.matrix[r][c]) {
+                    val targetR = startRow + r
+                    val targetC = startCol + c
+                    if (targetR !in 0 until 8 || targetC !in 0 until 8) {
+                        return false
+                    }
+                    if (grid[targetR][targetC] != 0) {
+                        return false
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    /**
+     * Checks if [shape] can fit anywhere across the 64 positions on the grid.
+     */
     fun canFitAnywhere(grid: List<List<Int>>, shape: BlockShape): Boolean {
         for (r in 0 until 8) {
             for (c in 0 until 8) {
@@ -119,6 +220,53 @@ class GameViewModel(
             }
         }
         return false
+    }
+
+    /**
+     * Evaluates if any of the remaining shapes can fit anywhere on the 8x8 board.
+     * Returns true if no valid move exists for any remaining piece.
+     */
+    fun checkGameOver(): Boolean {
+        return checkGameOver(_gameState.value.grid, _gameState.value.activePieces)
+    }
+
+    /**
+     * Evaluates if any piece in [remainingPieces] can fit anywhere on [grid].
+     */
+    fun checkGameOver(grid: List<List<Int>>, remainingPieces: List<BlockShape?>): Boolean {
+        val nonNullPieces = remainingPieces.filterNotNull()
+        if (nonNullPieces.isEmpty()) return false
+
+        // Check if ANY remaining piece can fit ANYWHERE on the 8x8 grid
+        for (piece in nonNullPieces) {
+            if (canFitAnywhere(grid, piece)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * 2D Array overload for checkGameOver.
+     */
+    fun checkGameOver(grid: Array<IntArray>, remainingPieces: List<BlockShape?>): Boolean {
+        val nonNullPieces = remainingPieces.filterNotNull()
+        if (nonNullPieces.isEmpty()) return false
+
+        for (piece in nonNullPieces) {
+            var canFit = false
+            for (r in 0 until 8) {
+                for (c in 0 until 8) {
+                    if (canPlaceShape(grid, piece, r, c)) {
+                        canFit = true
+                        break
+                    }
+                }
+                if (canFit) break
+            }
+            if (canFit) return false
+        }
+        return true
     }
 
     fun updateHoverPreview(shapeIndex: Int, targetRow: Int?, targetCol: Int?) {
@@ -267,6 +415,9 @@ class GameViewModel(
             } else {
                 soundManager.playLineClear(newCombo)
             }
+            triggerHaptic(HapticEffect.LineClear(newCombo))
+        } else {
+            triggerHaptic(HapticEffect.Placement)
         }
 
         val totalMovePoints = basePoints + linePoints
@@ -301,12 +452,68 @@ class GameViewModel(
             else -> null
         }
 
-        val popup = ScorePopup(
-            text = "+$totalMovePoints",
-            row = targetRow.coerceIn(0, 7),
-            col = targetCol.coerceIn(0, 7),
-            isCombo = newCombo > 1
-        )
+        // Floating text popups at coordinates of the clear
+        val popups = mutableListOf<ScorePopup>()
+
+        if (totalLines > 0) {
+            val ptsPerLine = linePoints / totalLines
+
+            // If rows and columns clear together, spawn at their intersection coordinates
+            if (completedRows.isNotEmpty() && completedCols.isNotEmpty()) {
+                for (r in completedRows) {
+                    for (c in completedCols) {
+                        val text = if (newCombo > 1) "+$totalMovePoints\nCOMBO x$newCombo!" else "+$totalMovePoints\nBLAST!"
+                        popups.add(
+                            ScorePopup(
+                                text = text,
+                                row = r.toFloat(),
+                                col = c.toFloat(),
+                                isCombo = true,
+                                comboMultiplier = newCombo
+                            )
+                        )
+                    }
+                }
+            } else {
+                // Completed rows: center is (row, 3.5f)
+                for (r in completedRows) {
+                    val text = if (newCombo > 1) "+$ptsPerLine x$newCombo" else "+$ptsPerLine"
+                    popups.add(
+                        ScorePopup(
+                            text = text,
+                            row = r.toFloat(),
+                            col = 3.5f,
+                            isCombo = newCombo > 1,
+                            comboMultiplier = newCombo
+                        )
+                    )
+                }
+
+                // Completed columns: center is (3.5f, col)
+                for (c in completedCols) {
+                    val text = if (newCombo > 1) "+$ptsPerLine x$newCombo" else "+$ptsPerLine"
+                    popups.add(
+                        ScorePopup(
+                            text = text,
+                            row = 3.5f,
+                            col = c.toFloat(),
+                            isCombo = newCombo > 1,
+                            comboMultiplier = newCombo
+                        )
+                    )
+                }
+            }
+        } else {
+            // Standard placement points popup at placement position
+            popups.add(
+                ScorePopup(
+                    text = "+$basePoints",
+                    row = targetRow.toFloat().coerceIn(0f, 7f),
+                    col = targetCol.toFloat().coerceIn(0f, 7f),
+                    isCombo = false
+                )
+            )
+        }
 
         val frozenGrid = newGrid.map { it.toList() }
         val isGameOver = checkGameOver(frozenGrid, finalPieces)
@@ -330,12 +537,13 @@ class GameViewModel(
                 prospectiveCols = emptySet(),
                 clearingCells = clearingCoords,
                 comboBannerText = bannerText,
-                scorePopups = listOf(popup)
+                scorePopups = popups
             )
         }
 
         if (isGameOver) {
             soundManager.playGameOver()
+            triggerHaptic(HapticEffect.GameOver)
         }
 
         // Reset clearing animation and popup after brief duration
@@ -349,24 +557,12 @@ class GameViewModel(
         return true
     }
 
-    private fun checkGameOver(grid: List<List<Int>>, remainingPieces: List<BlockShape?>): Boolean {
-        val nonNullPieces = remainingPieces.filterNotNull()
-        if (nonNullPieces.isEmpty()) return false
-
-        // Check if ANY remaining piece can fit ANYWHERE
-        for (piece in nonNullPieces) {
-            if (canFitAnywhere(grid, piece)) {
-                return false
-            }
-        }
-        return true
-    }
-
     fun useSecondChance() {
         val state = _gameState.value
         if (!state.secondChanceAvailable || !state.isGameOver) return
 
         soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
 
         // Clear center 3x3 (rows 2..4, cols 2..4) and any 1 crowded row/col to rescue player
         val newGrid = state.grid.map { it.toMutableList() }.toMutableList()

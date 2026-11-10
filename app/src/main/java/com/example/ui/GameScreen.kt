@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -41,19 +42,26 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.audio.AppHaptics
+import com.example.audio.HapticEffect
 import com.example.model.BlockShape
-import com.example.ui.components.GameBoard
+import com.example.ui.components.GridBoard
 import com.example.ui.components.GameOverDialog
 import com.example.ui.components.PieceDeck
+import com.example.ui.components.PieceSlot
 import com.example.ui.components.ScoreHeader
 import com.example.ui.components.ShapeRenderer
 import com.example.ui.components.StatsDialog
+import com.example.ui.components.TutorialOverlay
 import com.example.ui.theme.DarkBackground
 import com.example.viewmodel.GameViewModel
 
@@ -63,7 +71,19 @@ fun GameScreen(
     modifier: Modifier = Modifier
 ) {
     val gameState by viewModel.gameState.collectAsState()
+    val showTutorial by viewModel.showTutorial.collectAsState()
     val density = LocalDensity.current
+
+    // Haptic feedback & context
+    val hapticFeedback = LocalHapticFeedback.current
+    val context = LocalContext.current
+
+    // Observe and perform tactile vibrations on placement, line clears, pickups, and game over
+    LaunchedEffect(viewModel) {
+        viewModel.hapticEvent.collect { effect ->
+            AppHaptics.perform(context, effect, hapticFeedback)
+        }
+    }
 
     // Dialog state
     var showStatsDialog by remember { mutableStateOf(false) }
@@ -114,6 +134,7 @@ fun GameScreen(
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
                 onShowStats = { showStatsDialog = true },
+                onShowTutorial = { viewModel.openTutorial() },
                 onRestart = { viewModel.startNewGame() }
             )
 
@@ -121,7 +142,7 @@ fun GameScreen(
             val ghostColorId = draggingShape?.colorId
                 ?: gameState.selectedShapeIndex?.let { gameState.activePieces.getOrNull(it)?.colorId }
 
-            GameBoard(
+            GridBoard(
                 gameState = gameState,
                 ghostColorId = ghostColorId,
                 onCellTapped = { row, col ->
@@ -271,6 +292,13 @@ fun GameScreen(
                 onDismiss = { showStatsDialog = false }
             )
         }
+
+        // Interactive Semi-Transparent Tutorial Overlay for new players
+        TutorialOverlay(
+            visible = showTutorial,
+            onDismiss = { viewModel.dismissTutorial() },
+            soundManager = viewModel.soundManager
+        )
     }
 }
 

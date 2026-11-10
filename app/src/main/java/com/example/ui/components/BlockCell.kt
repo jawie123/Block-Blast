@@ -34,6 +34,7 @@ fun BlockCell(
     ghostColorId: Int? = null,
     isClearing: Boolean = false,
     isProspectiveClear: Boolean = false,
+    emptyTileTint: Color? = null,
     cornerRadius: Dp = 6.dp,
     modifier: Modifier = Modifier
 ) {
@@ -119,15 +120,15 @@ fun BlockCell(
 
         // Empty tile cell on 8x8 grid
         else -> {
-            val emptyBg = if (isProspectiveClear) {
-                Color(0xFFFFD700).copy(alpha = prospectivePulse * 0.25f)
-            } else {
-                CellEmpty
+            val emptyBg = when {
+                isProspectiveClear -> Color(0xFFFFD700).copy(alpha = prospectivePulse * 0.25f)
+                emptyTileTint != null -> emptyTileTint.copy(alpha = 0.09f)
+                else -> CellEmpty
             }
-            val emptyBorder = if (isProspectiveClear) {
-                Color(0xFFFFD700).copy(alpha = prospectivePulse * 0.8f)
-            } else {
-                CellEmptyBorder
+            val emptyBorder = when {
+                isProspectiveClear -> Color(0xFFFFD700).copy(alpha = prospectivePulse * 0.8f)
+                emptyTileTint != null -> emptyTileTint.copy(alpha = 0.28f)
+                else -> CellEmptyBorder
             }
 
             Box(

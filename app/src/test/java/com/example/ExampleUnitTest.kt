@@ -61,6 +61,30 @@ class ExampleUnitTest {
         assertFalse(canPlaceTest(emptyGrid, square2x2, 7, 7)) // Bottom-right would overflow
     }
 
+    @Test
+    fun testCheckGameOverDetection() {
+        // Full board: no empty cells
+        val fullGrid = List(8) { List(8) { 1 } }
+        val shapes = listOf(
+            BlockShape(
+                id = "dot",
+                name = "dot",
+                matrix = listOf(listOf(true)),
+                colorId = 1
+            )
+        )
+        // With all cells occupied, dot cannot fit anywhere -> Game Over is true
+        val isGameOver = checkGameOverTest(fullGrid, shapes)
+        assertTrue(isGameOver)
+
+        // Board with one cell empty
+        val almostFullGrid = fullGrid.mapIndexed { r, row ->
+            row.mapIndexed { c, v -> if (r == 4 && c == 4) 0 else v }
+        }
+        val isNotGameOver = checkGameOverTest(almostFullGrid, shapes)
+        assertFalse(isNotGameOver)
+    }
+
     private fun canPlaceTest(
         grid: List<List<Int>>,
         shape: BlockShape,
@@ -74,6 +98,24 @@ class ExampleUnitTest {
                     val targetC = startCol + c
                     if (targetR !in 0 until 8 || targetC !in 0 until 8) return false
                     if (grid[targetR][targetC] != 0) return false
+                }
+            }
+        }
+        return true
+    }
+
+    private fun checkGameOverTest(
+        grid: List<List<Int>>,
+        remainingPieces: List<BlockShape?>
+    ): Boolean {
+        val pieces = remainingPieces.filterNotNull()
+        if (pieces.isEmpty()) return false
+        for (piece in pieces) {
+            for (r in 0 until 8) {
+                for (c in 0 until 8) {
+                    if (canPlaceTest(grid, piece, r, c)) {
+                        return false
+                    }
                 }
             }
         }

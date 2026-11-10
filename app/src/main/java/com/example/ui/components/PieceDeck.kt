@@ -37,6 +37,110 @@ import com.example.model.BlockShape
 import com.example.ui.theme.BoardBackground
 import com.example.ui.theme.BoardBorder
 
+/**
+ * PieceSlot composable to display an individual active random shape in the piece pool.
+ */
+@Composable
+fun PieceSlot(
+    index: Int,
+    shape: BlockShape?,
+    canFit: Boolean,
+    isSelected: Boolean,
+    isDragging: Boolean,
+    onSelectPiece: (index: Int?) -> Unit,
+    onDragStart: (index: Int, touchPosRoot: Offset) -> Unit,
+    onDragMove: (delta: Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+    Box(
+        modifier = modifier
+            .height(115.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(BoardBackground)
+            .border(
+                width = if (isSelected) 2.dp else 1.dp,
+                color = if (isSelected) Color(0xFF00E5FF) else BoardBorder,
+                shape = RoundedCornerShape(14.dp)
+            )
+            .testTag("piece_slot_$index"),
+        contentAlignment = Alignment.Center
+    ) {
+        if (shape != null && !isDragging) {
+            val scale by animateFloatAsState(
+                targetValue = if (isSelected) 1.08f else 1.0f,
+                label = "slotScale_$index"
+            )
+
+            var slotRootBounds = Offset.Zero
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scale(scale)
+                    .alpha(if (canFit) 1.0f else 0.38f)
+                    .onGloballyPositioned { coordinates ->
+                        val bounds = coordinates.boundsInRoot()
+                        slotRootBounds = bounds.center
+                    }
+                    .pointerInput(shape.instanceId) {
+                        detectDragGestures(
+                            onDragStart = { localOffset ->
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                onDragStart(index, slotRootBounds + localOffset)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                onDragMove(dragAmount)
+                            },
+                            onDragEnd = { onDragEnd() },
+                            onDragCancel = { onDragEnd() }
+                        )
+                    }
+                    .clickable {
+                        if (canFit) {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            if (isSelected) {
+                                onSelectPiece(null)
+                            } else {
+                                onSelectPiece(index)
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                ShapeRenderer(
+                    shape = shape,
+                    cellUnitDp = 20.dp
+                )
+            }
+
+            if (!canFit) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xCC000000))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "NO FIT",
+                        color = Color(0xFFFF5252),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * PieceDeck composable holding the 3 PieceSlot containers.
+ */
 @Composable
 fun PieceDeck(
     pieces: List<BlockShape?>,
@@ -58,91 +162,18 @@ fun PieceDeck(
         verticalAlignment = Alignment.CenterVertically
     ) {
         for (i in 0 until 3) {
-            val shape = pieces.getOrNull(i)
-            val canFit = canFitList.getOrNull(i) ?: true
-            val isSelected = selectedShapeIndex == i
-            val isDraggingThis = draggingPieceIndex == i
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(115.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(BoardBackground)
-                    .border(
-                        width = if (isSelected) 2.dp else 1.dp,
-                        color = if (isSelected) Color(0xFF00E5FF) else BoardBorder,
-                        shape = RoundedCornerShape(14.dp)
-                    )
-                    .testTag("piece_slot_$i"),
-                contentAlignment = Alignment.Center
-            ) {
-                if (shape != null && !isDraggingThis) {
-                    val scale by animateFloatAsState(
-                        targetValue = if (isSelected) 1.08f else 1.0f,
-                        label = "slotScale"
-                    )
-
-                    var slotRootBounds = Offset.Zero
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .scale(scale)
-                            .alpha(if (canFit) 1.0f else 0.38f)
-                            .onGloballyPositioned { coordinates ->
-                                val bounds = coordinates.boundsInRoot()
-                                slotRootBounds = bounds.center
-                            }
-                            .pointerInput(shape.instanceId) {
-                                detectDragGestures(
-                                    onDragStart = { localOffset ->
-                                        onDragStart(i, slotRootBounds + localOffset)
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        onDragMove(dragAmount)
-                                    },
-                                    onDragEnd = { onDragEnd() },
-                                    onDragCancel = { onDragEnd() }
-                                )
-                            }
-                            .clickable {
-                                if (canFit) {
-                                    if (isSelected) {
-                                        onSelectPiece(null)
-                                    } else {
-                                        onSelectPiece(i)
-                                    }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        ShapeRenderer(
-                            shape = shape,
-                            cellUnitDp = 20.dp
-                        )
-                    }
-
-                    if (!canFit) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 6.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xCC000000))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "NO FIT",
-                                color = Color(0xFFFF5252),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
+            PieceSlot(
+                index = i,
+                shape = pieces.getOrNull(i),
+                canFit = canFitList.getOrNull(i) ?: true,
+                isSelected = selectedShapeIndex == i,
+                isDragging = draggingPieceIndex == i,
+                onSelectPiece = onSelectPiece,
+                onDragStart = onDragStart,
+                onDragMove = onDragMove,
+                onDragEnd = onDragEnd,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }

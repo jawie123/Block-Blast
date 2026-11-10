@@ -48,4 +48,16 @@ class ExampleRobolectricTest {
         // Row 0 is occupied, dot cannot be placed at (0, 0)
         assertEquals(1, fullRowGrid[0][0])
     }
+
+    @Test
+    fun `test hasSeenTutorial preference is false initially and persists true`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = com.example.data.GamePreferences(context)
+        // Fresh install / first launch
+        assertFalse(prefs.hasSeenTutorial)
+
+        // Dismissing tutorial marks it true
+        prefs.hasSeenTutorial = true
+        assertTrue(prefs.hasSeenTutorial)
+    }
 }

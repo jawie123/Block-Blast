@@ -1,11 +1,12 @@
 package com.example.model
 
 data class ScorePopup(
-    val id: Long = System.currentTimeMillis() + (0..999).random(),
+    val id: Long = System.nanoTime() + (0..9999).random(),
     val text: String,
-    val row: Int,
-    val col: Int,
-    val isCombo: Boolean = false
+    val row: Float,
+    val col: Float,
+    val isCombo: Boolean = false,
+    val comboMultiplier: Int = 1
 )
 
 data class GameState(

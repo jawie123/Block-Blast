@@ -2,8 +2,7 @@ package com.example.audio
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
+import android.media.SoundPool
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -11,11 +10,22 @@ import android.os.VibratorManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.sin
 
+/**
+ * SoundManager using Android's SoundPool to deliver crisp, zero-latency
+ * arcade sound effects during block placement, line clears, combos, and game-over states.
+ */
 class SoundManager(private val context: Context) {
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private val scope = CoroutineScope(Dispatchers.IO)
+
+    var isSoundEnabled: Boolean = true
+    var isHapticsEnabled: Boolean = true
 
     private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
@@ -25,123 +35,221 @@ class SoundManager(private val context: Context) {
         context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
     }
 
-    var isSoundEnabled: Boolean = true
-    var isHapticsEnabled: Boolean = true
+    private val soundPool: SoundPool = SoundPool.Builder()
+        .setMaxStreams(8)
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_GAME)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+        )
+        .build()
 
-    private fun playTone(
-        frequencies: DoubleArray,
-        durationsMs: DoubleArray,
-        decay: Boolean = true
-    ) {
-        if (!isSoundEnabled) return
+    // Sound IDs loaded into SoundPool
+    private var soundPickupId: Int = 0
+    private var soundPlaceId: Int = 0
+    private var soundLineClearId: Int = 0
+    private var soundComboId: Int = 0
+    private var soundGameOverId: Int = 0
+    private var soundPowerupId: Int = 0
+
+    init {
         scope.launch {
-            try {
-                val sampleRate = 22050
-                val totalDurationMs = durationsMs.sum()
-                val totalSamples = (sampleRate * (totalDurationMs / 1000.0)).toInt()
-                val buffer = ShortArray(totalSamples)
-
-                var sampleOffset = 0
-                for (seg in frequencies.indices) {
-                    val freq = frequencies[seg]
-                    val segMs = durationsMs[seg]
-                    val segSamples = (sampleRate * (segMs / 1000.0)).toInt()
-
-                    for (i in 0 until segSamples) {
-                        if (sampleOffset + i >= totalSamples) break
-                        val t = i.toDouble() / sampleRate
-                        val rawSample = sin(2.0 * PI * freq * t)
-                        val envelope = if (decay) {
-                            (1.0 - (i.toDouble() / segSamples)).coerceIn(0.0, 1.0)
-                        } else {
-                            1.0
-                        }
-                        val value = (rawSample * envelope * Short.MAX_VALUE * 0.7).toInt()
-                        buffer[sampleOffset + i] = value.toShort()
-                    }
-                    sampleOffset += segSamples
-                }
-
-                val audioTrack = AudioTrack.Builder()
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_GAME)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
-                    .setAudioFormat(
-                        AudioFormat.Builder()
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setSampleRate(sampleRate)
-                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                            .build()
-                    )
-                    .setBufferSizeInBytes(buffer.size * 2)
-                    .setTransferMode(AudioTrack.MODE_STATIC)
-                    .build()
-
-                audioTrack.write(buffer, 0, buffer.size)
-                audioTrack.play()
-                // Release after playing
-                scope.launch {
-                    kotlinx.coroutines.delay(totalDurationMs.toLong() + 100)
-                    try {
-                        audioTrack.stop()
-                        audioTrack.release()
-                    } catch (_: Exception) {}
-                }
-            } catch (_: Exception) {}
+            initSounds()
         }
     }
 
+    private fun initSounds() {
+        try {
+            val sampleRate = 22050
+
+            // 1. Placement Sound: punchy arcade pop (260Hz down to 120Hz)
+            val placeSamples = generateToneSamples(
+                frequencies = doubleArrayOf(260.0, 180.0, 120.0),
+                durationsMs = doubleArrayOf(20.0, 25.0, 30.0),
+                sampleRate = sampleRate,
+                decay = true
+            )
+            val placeFile = writeWavFile("snd_place.wav", placeSamples, sampleRate)
+            soundPlaceId = soundPool.load(placeFile.absolutePath, 1)
+
+            // 2. Pickup Sound: gentle bright chirp (520Hz to 660Hz)
+            val pickupSamples = generateToneSamples(
+                frequencies = doubleArrayOf(520.0, 660.0),
+                durationsMs = doubleArrayOf(20.0, 25.0),
+                sampleRate = sampleRate,
+                decay = true
+            )
+            val pickupFile = writeWavFile("snd_pickup.wav", pickupSamples, sampleRate)
+            soundPickupId = soundPool.load(pickupFile.absolutePath, 1)
+
+            // 3. Line Clear Sound: ascending chord chime (C5, E5, G5, C6)
+            val clearSamples = generateToneSamples(
+                frequencies = doubleArrayOf(523.25, 659.25, 783.99, 1046.50),
+                durationsMs = doubleArrayOf(60.0, 60.0, 70.0, 120.0),
+                sampleRate = sampleRate,
+                decay = true
+            )
+            val clearFile = writeWavFile("snd_clear.wav", clearSamples, sampleRate)
+            soundLineClearId = soundPool.load(clearFile.absolutePath, 1)
+
+            // 4. Combo Cheer: sparkling high-energy fanfare chord
+            val comboSamples = generateToneSamples(
+                frequencies = doubleArrayOf(523.25, 659.25, 783.99, 1046.50, 1318.51),
+                durationsMs = doubleArrayOf(50.0, 50.0, 60.0, 80.0, 180.0),
+                sampleRate = sampleRate,
+                decay = true
+            )
+            val comboFile = writeWavFile("snd_combo.wav", comboSamples, sampleRate)
+            soundComboId = soundPool.load(comboFile.absolutePath, 1)
+
+            // 5. Game Over: sad descending slide (440Hz down to 146Hz)
+            val overSamples = generateToneSamples(
+                frequencies = doubleArrayOf(440.0, 370.0, 293.66, 220.0, 146.83),
+                durationsMs = doubleArrayOf(90.0, 90.0, 110.0, 130.0, 220.0),
+                sampleRate = sampleRate,
+                decay = true
+            )
+            val overFile = writeWavFile("snd_gameover.wav", overSamples, sampleRate)
+            soundGameOverId = soundPool.load(overFile.absolutePath, 1)
+
+            // 6. PowerUp / Second Chance: ascending sci-fi whoosh
+            val powerSamples = generateToneSamples(
+                frequencies = doubleArrayOf(220.0, 293.66, 370.0, 440.0, 587.33, 740.0, 880.0, 1174.66),
+                durationsMs = doubleArrayOf(30.0, 30.0, 30.0, 35.0, 35.0, 40.0, 50.0, 150.0),
+                sampleRate = sampleRate,
+                decay = false
+            )
+            val powerFile = writeWavFile("snd_powerup.wav", powerSamples, sampleRate)
+            soundPowerupId = soundPool.load(powerFile.absolutePath, 1)
+        } catch (_: Exception) {}
+    }
+
+    fun playClick() {
+        playPickup()
+    }
+
     fun playPickup() {
-        playTone(doubleArrayOf(440.0, 587.33), doubleArrayOf(30.0, 40.0), decay = true)
+        if (!isSoundEnabled) return
+        if (soundPickupId != 0) {
+            soundPool.play(soundPickupId, 0.85f, 0.85f, 1, 0, 1.0f)
+        }
         vibrate(15)
     }
 
     fun playPlace() {
-        playTone(doubleArrayOf(220.0, 330.0), doubleArrayOf(35.0, 45.0), decay = true)
+        if (!isSoundEnabled) return
+        if (soundPlaceId != 0) {
+            soundPool.play(soundPlaceId, 1f, 1f, 1, 0, 1.0f)
+        }
         vibrate(25)
     }
 
+    /**
+     * Plays line clear chime with pitch scaling higher with combo streak.
+     */
     fun playLineClear(comboStreak: Int) {
-        // Ascending chord pitches scale up with combo streak
-        val baseFreq = when (comboStreak.coerceIn(0, 8)) {
-            0 -> 392.0 // G4
-            1 -> 440.0 // A4
-            2 -> 523.25 // C5
-            3 -> 587.33 // D5
-            4 -> 659.25 // E5
-            5 -> 783.99 // G5
-            6 -> 880.00 // A5
-            else -> 1046.50 // C6
+        if (!isSoundEnabled) return
+        val pitchRate = (1.0f + (comboStreak.coerceIn(0, 6) * 0.12f)).coerceIn(0.8f, 2.0f)
+        if (soundLineClearId != 0) {
+            soundPool.play(soundLineClearId, 1f, 1f, 2, 0, pitchRate)
         }
-
-        val freqs = doubleArrayOf(baseFreq, baseFreq * 1.25, baseFreq * 1.5, baseFreq * 2.0)
-        val durations = doubleArrayOf(50.0, 50.0, 60.0, 120.0)
-        playTone(freqs, durations, decay = true)
         vibrateHeavy()
     }
 
     fun playComboCheer() {
-        val freqs = doubleArrayOf(523.25, 659.25, 783.99, 1046.50, 1318.51)
-        val durations = doubleArrayOf(60.0, 60.0, 60.0, 80.0, 180.0)
-        playTone(freqs, durations, decay = true)
+        if (!isSoundEnabled) return
+        if (soundComboId != 0) {
+            soundPool.play(soundComboId, 1f, 1f, 3, 0, 1.0f)
+        }
         vibrateHeavy()
     }
 
     fun playGameOver() {
-        val freqs = doubleArrayOf(440.0, 392.0, 349.23, 293.66)
-        val durations = doubleArrayOf(100.0, 100.0, 120.0, 250.0)
-        playTone(freqs, durations, decay = true)
+        if (!isSoundEnabled) return
+        if (soundGameOverId != 0) {
+            soundPool.play(soundGameOverId, 1f, 1f, 4, 0, 1.0f)
+        }
         vibrate(60)
     }
 
     fun playPowerup() {
-        val freqs = doubleArrayOf(261.63, 329.63, 392.0, 523.25, 659.25, 783.99, 1046.50)
-        val durations = doubleArrayOf(30.0, 30.0, 30.0, 30.0, 40.0, 50.0, 150.0)
-        playTone(freqs, durations, decay = false)
+        if (!isSoundEnabled) return
+        if (soundPowerupId != 0) {
+            soundPool.play(soundPowerupId, 1f, 1f, 3, 0, 1.0f)
+        }
         vibrateHeavy()
+    }
+
+    private fun writeWavFile(filename: String, samples: ShortArray, sampleRate: Int): File {
+        val file = File(context.cacheDir, filename)
+        val dataSize = samples.size * 2
+        val totalSize = dataSize + 36
+
+        FileOutputStream(file).use { out ->
+            val header = ByteBuffer.allocate(44).apply {
+                order(ByteOrder.LITTLE_ENDIAN)
+                // RIFF chunk
+                put('R'.code.toByte()); put('I'.code.toByte()); put('F'.code.toByte()); put('F'.code.toByte())
+                putInt(totalSize)
+                put('W'.code.toByte()); put('A'.code.toByte()); put('V'.code.toByte()); put('E'.code.toByte())
+                // fmt chunk
+                put('f'.code.toByte()); put('m'.code.toByte()); put('t'.code.toByte()); put(' '.code.toByte())
+                putInt(16) // Subchunk1Size
+                putShort(1) // AudioFormat (PCM)
+                putShort(1) // NumChannels (Mono)
+                putInt(sampleRate)
+                putInt(sampleRate * 2) // ByteRate
+                putShort(2) // BlockAlign
+                putShort(16) // BitsPerSample
+                // data chunk
+                put('d'.code.toByte()); put('a'.code.toByte()); put('t'.code.toByte()); put('a'.code.toByte())
+                putInt(dataSize)
+            }
+            out.write(header.array())
+
+            val sampleBytes = ByteBuffer.allocate(dataSize).apply {
+                order(ByteOrder.LITTLE_ENDIAN)
+                for (s in samples) {
+                    putShort(s)
+                }
+            }
+            out.write(sampleBytes.array())
+        }
+        return file
+    }
+
+    private fun generateToneSamples(
+        frequencies: DoubleArray,
+        durationsMs: DoubleArray,
+        sampleRate: Int,
+        decay: Boolean
+    ): ShortArray {
+        val totalDurationMs = durationsMs.sum()
+        val totalSamples = (sampleRate * (totalDurationMs / 1000.0)).toInt()
+        val buffer = ShortArray(totalSamples)
+
+        var sampleOffset = 0
+        for (seg in frequencies.indices) {
+            val freq = frequencies[seg]
+            val segMs = durationsMs[seg]
+            val segSamples = (sampleRate * (segMs / 1000.0)).toInt()
+
+            for (i in 0 until segSamples) {
+                if (sampleOffset + i >= totalSamples) break
+                val t = i.toDouble() / sampleRate
+                val rawSample = 0.8 * sin(2.0 * PI * freq * t) + 0.2 * sin(4.0 * PI * freq * t)
+                val envelope = if (decay) {
+                    (1.0 - (i.toDouble() / segSamples)).coerceIn(0.0, 1.0)
+                } else {
+                    1.0
+                }
+                val value = (rawSample * envelope * Short.MAX_VALUE * 0.75).toInt()
+                buffer[sampleOffset + i] = value.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            }
+            sampleOffset += segSamples
+        }
+        return buffer
     }
 
     private fun vibrate(durationMs: Long) {
@@ -167,6 +275,12 @@ class SoundManager(private val context: Context) {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(60)
             }
+        } catch (_: Exception) {}
+    }
+
+    fun release() {
+        try {
+            soundPool.release()
         } catch (_: Exception) {}
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeMute
@@ -54,6 +55,7 @@ fun ScoreHeader(
     onToggleSound: () -> Unit,
     onToggleHaptics: () -> Unit,
     onShowStats: () -> Unit,
+    onShowTutorial: () -> Unit = {},
     onRestart: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -143,6 +145,20 @@ fun ScoreHeader(
                         imageVector = Icons.Default.BarChart,
                         contentDescription = "Statistics",
                         tint = Color(0xFFB47CFF),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onShowTutorial,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("help_tutorial_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "How to Play Tutorial",
+                        tint = Color(0xFF00E5FF),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -258,5 +274,13 @@ fun ScoreHeader(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Visual Combo Streak Meter displaying multiplier and consecutive clear progress
+        ComboStreakMeter(
+            comboStreak = comboStreak,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }

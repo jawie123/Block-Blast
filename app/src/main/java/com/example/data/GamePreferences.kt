@@ -31,6 +31,10 @@ class GamePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_HAPTICS_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_HAPTICS_ENABLED, value).apply()
 
+    var hasSeenTutorial: Boolean
+        get() = prefs.getBoolean(KEY_HAS_SEEN_TUTORIAL, false)
+        set(value) = prefs.edit().putBoolean(KEY_HAS_SEEN_TUTORIAL, value).apply()
+
     companion object {
         private const val KEY_HIGH_SCORE = "key_high_score"
         private const val KEY_HIGHEST_COMBO = "key_highest_combo"
@@ -38,5 +42,6 @@ class GamePreferences(context: Context) {
         private const val KEY_GAMES_PLAYED = "key_games_played"
         private const val KEY_SOUND_ENABLED = "key_sound_enabled"
         private const val KEY_HAPTICS_ENABLED = "key_haptics_enabled"
+        private const val KEY_HAS_SEEN_TUTORIAL = "key_has_seen_tutorial"
     }
 }
