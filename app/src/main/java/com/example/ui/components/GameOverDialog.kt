@@ -21,8 +21,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.EmojiEvents
+import com.example.model.GameMode
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ViewWeek
@@ -60,6 +62,11 @@ fun GameOverDialog(
     linesCleared: Int,
     maxCombo: Int,
     secondChanceAvailable: Boolean,
+    canUndo: Boolean = false,
+    gameMode: GameMode = GameMode.CLASSIC,
+    dailyTargetScore: Int = 5000,
+    dailyGlobalRecord: Int = 8540,
+    onUndo: () -> Unit = {},
     onSecondChance: () -> Unit,
     onRestart: () -> Unit
 ) {
@@ -302,6 +309,70 @@ fun GameOverDialog(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Daily Challenge result card
+                if (gameMode == GameMode.DAILY_CHALLENGE) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E1528))
+                            .border(1.dp, Color(0xFFFF9800), RoundedCornerShape(12.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (score >= dailyTargetScore) "🎉 CHALLENGE COMPLETED!" else "DAILY CHALLENGE ATTEMPT",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 12.sp,
+                                color = if (score >= dailyTargetScore) GoldAccent else Color(0xFFFF9800)
+                            )
+                            Text(
+                                text = "Your Score: $score  •  Global Record: $dailyGlobalRecord",
+                                fontSize = 11.sp,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Undo Last Placement Button if move can be reverted
+                if (canUndo) {
+                    OutlinedButton(
+                        onClick = onUndo,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("dialog_undo_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF00E5FF)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Undo,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "UNDO LAST MOVE",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
 
                 // Restart New Game Button

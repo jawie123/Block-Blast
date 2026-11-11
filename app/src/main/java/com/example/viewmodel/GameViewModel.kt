@@ -8,9 +8,15 @@ import com.example.audio.HapticEffect
 import com.example.audio.SoundManager
 import com.example.data.GamePreferences
 import com.example.model.BlockShape
+import com.example.model.GameMode
 import com.example.model.GameState
+import com.example.model.LineClearBurst
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,13 +94,62 @@ class GameViewModel(
         }
     }
 
+    data class UndoSnapshot(
+        val grid: List<List<Int>>,
+        val activePieces: List<BlockShape?>,
+        val score: Int,
+        val highScore: Int,
+        val comboStreak: Int,
+        val maxComboSession: Int,
+        val linesClearedSession: Int,
+        val isGameOver: Boolean,
+        val isNewHighScore: Boolean,
+        val dailyBatchIndex: Int
+    )
+
+    private var lastUndoSnapshot: UndoSnapshot? = null
+
+    fun computeDailySeed(): Long {
+        val cal = Calendar.getInstance()
+        return (cal.get(Calendar.YEAR) * 10000 + (cal.get(Calendar.MONTH) + 1) * 100 + cal.get(Calendar.DAY_OF_MONTH)).toLong()
+    }
+
+    fun getTodayDateString(): String {
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    }
+
+    fun getTodayFormattedString(): String {
+        return SimpleDateFormat("MMM d, yyyy", Locale.US).format(Date())
+    }
+
     /**
-     * Initializes a new game with an empty 8x8 grid and 3 random shapes.
+     * Initializes a new game for Classic or Daily Challenge mode.
      */
-    fun startNewGame() {
-        val initialShapes = ShapeDefinitions.getRandomShapeBatch()
-        val high = preferences.highScore
-        preferences.gamesPlayed = preferences.gamesPlayed + 1
+    fun startNewGame(mode: GameMode = _gameState.value.gameMode) {
+        lastUndoSnapshot = null
+        val isDaily = mode == GameMode.DAILY_CHALLENGE
+        val dateStr = getTodayDateString()
+        val dateFormatted = getTodayFormattedString()
+        val seed = computeDailySeed()
+
+        val initialShapes = if (isDaily) {
+            ShapeDefinitions.getDailyShapeBatch(seed, 0)
+        } else {
+            ShapeDefinitions.getRandomShapeBatch()
+        }
+
+        val high = if (isDaily) {
+            preferences.getDailyHighScore(dateStr)
+        } else {
+            preferences.highScore
+        }
+
+        if (!isDaily) {
+            preferences.gamesPlayed = preferences.gamesPlayed + 1
+        }
+
+        val targetScore = 4500 + ((seed % 1000).toInt())
+        val globalRecord = 8400 + ((seed % 1600).toInt())
 
         _gameState.value = GameState(
             grid = List(8) { List(8) { 0 } },
@@ -112,10 +167,63 @@ class GameViewModel(
             prospectiveRows = emptySet(),
             prospectiveCols = emptySet(),
             clearingCells = emptySet(),
-            comboBannerText = null,
-            scorePopups = emptyList()
+            comboBannerText = if (isDaily) "DAILY CHALLENGE: $dateFormatted" else null,
+            scorePopups = emptyList(),
+            gameMode = mode,
+            dailyDate = dateStr,
+            dailyFormattedDate = dateFormatted,
+            dailyBatchIndex = 0,
+            dailyTargetScore = targetScore,
+            dailyGlobalRecord = globalRecord,
+            canUndo = false
         )
     }
+
+    fun switchGameMode(mode: GameMode) {
+        if (_gameState.value.gameMode == mode) return
+        startNewGame(mode)
+    }
+
+    /**
+     * Reverts the last piece placement, restoring the previous grid state, score,
+     * piece pool, and combo streak.
+     */
+    fun undoLastMove(): Boolean {
+        val snapshot = lastUndoSnapshot ?: return false
+        lastUndoSnapshot = null
+
+        _gameState.update {
+            it.copy(
+                grid = snapshot.grid,
+                activePieces = snapshot.activePieces,
+                score = snapshot.score,
+                highScore = snapshot.highScore,
+                comboStreak = snapshot.comboStreak,
+                maxComboSession = snapshot.maxComboSession,
+                linesClearedSession = snapshot.linesClearedSession,
+                isGameOver = snapshot.isGameOver,
+                isNewHighScore = snapshot.isNewHighScore,
+                dailyBatchIndex = snapshot.dailyBatchIndex,
+                selectedShapeIndex = null,
+                hoverRow = null,
+                hoverCol = null,
+                hoverPreviewCells = emptySet(),
+                prospectiveRows = emptySet(),
+                prospectiveCols = emptySet(),
+                clearingCells = emptySet(),
+                lineClearBursts = emptyList(),
+                comboBannerText = "MOVE UNDONE",
+                scorePopups = emptyList(),
+                canUndo = false
+            )
+        }
+
+        soundManager.playPickup()
+        triggerHaptic(HapticEffect.Pickup)
+        return true
+    }
+
+    fun getDailyStreak(): Int = preferences.dailyStreak
 
     fun toggleSound(): Boolean {
         val newVal = !soundManager.isSoundEnabled
@@ -344,6 +452,20 @@ class GameViewModel(
             return false
         }
 
+        // Save undo snapshot before applying the move
+        lastUndoSnapshot = UndoSnapshot(
+            grid = currentState.grid,
+            activePieces = currentState.activePieces,
+            score = currentState.score,
+            highScore = currentState.highScore,
+            comboStreak = currentState.comboStreak,
+            maxComboSession = currentState.maxComboSession,
+            linesClearedSession = currentState.linesClearedSession,
+            isGameOver = currentState.isGameOver,
+            isNewHighScore = currentState.isNewHighScore,
+            dailyBatchIndex = currentState.dailyBatchIndex
+        )
+
         // Place cells onto grid
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
         val placedCells = mutableListOf<Pair<Int, Int>>()
@@ -379,6 +501,7 @@ class GameViewModel(
         var linePoints = 0
         var newCombo = 0
         val clearingCoords = mutableSetOf<Pair<Int, Int>>()
+        val lineBursts = mutableListOf<LineClearBurst>()
 
         if (totalLines > 0) {
             newCombo = currentState.comboStreak + 1
@@ -393,7 +516,7 @@ class GameViewModel(
             }
             linePoints += bonus
 
-            // Collect clearing coordinates
+            // Collect clearing coordinates and generate particle bursts with block colors
             for (r in completedRows) {
                 for (c in 0 until 8) {
                     clearingCoords.add(Pair(r, c))
@@ -403,6 +526,22 @@ class GameViewModel(
                 for (r in 0 until 8) {
                     clearingCoords.add(Pair(r, c))
                 }
+            }
+
+            for (coord in clearingCoords) {
+                val r = coord.first
+                val c = coord.second
+                val tileColor = newGrid[r][c]
+                lineBursts.add(
+                    LineClearBurst(
+                        row = r,
+                        col = c,
+                        colorId = if (tileColor > 0) tileColor else shape.colorId,
+                        comboMultiplier = newCombo,
+                        isRowClear = completedRows.contains(r),
+                        isColClear = completedCols.contains(c)
+                    )
+                )
             }
 
             // Clear the cells
@@ -423,10 +562,19 @@ class GameViewModel(
         val totalMovePoints = basePoints + linePoints
         val newScore = currentState.score + totalMovePoints
         var newHigh = maxOf(newScore, currentState.highScore)
-        val isNewRecord = newScore > preferences.highScore
+        val isDaily = currentState.gameMode == GameMode.DAILY_CHALLENGE
+        val isNewRecord = if (isDaily) {
+            newScore > preferences.getDailyHighScore(currentState.dailyDate)
+        } else {
+            newScore > preferences.highScore
+        }
 
         if (isNewRecord) {
-            preferences.highScore = newScore
+            if (isDaily) {
+                preferences.setDailyHighScore(currentState.dailyDate, newScore)
+            } else {
+                preferences.highScore = newScore
+            }
         }
         if (newCombo > preferences.highestCombo) {
             preferences.highestCombo = newCombo
@@ -437,8 +585,14 @@ class GameViewModel(
         val updatedPieces = currentState.activePieces.toMutableList()
         updatedPieces[shapeIndex] = null
 
+        var nextBatchIndex = currentState.dailyBatchIndex
         val finalPieces = if (updatedPieces.all { it == null }) {
-            ShapeDefinitions.getRandomShapeBatch()
+            if (isDaily) {
+                nextBatchIndex++
+                ShapeDefinitions.getDailyShapeBatch(computeDailySeed(), nextBatchIndex)
+            } else {
+                ShapeDefinitions.getRandomShapeBatch()
+            }
         } else {
             updatedPieces
         }
@@ -536,12 +690,18 @@ class GameViewModel(
                 prospectiveRows = emptySet(),
                 prospectiveCols = emptySet(),
                 clearingCells = clearingCoords,
+                lineClearBursts = lineBursts,
                 comboBannerText = bannerText,
-                scorePopups = popups
+                scorePopups = popups,
+                canUndo = true,
+                dailyBatchIndex = nextBatchIndex
             )
         }
 
         if (isGameOver) {
+            if (isDaily) {
+                preferences.recordDailyGame(currentState.dailyDate, newScore)
+            }
             soundManager.playGameOver()
             triggerHaptic(HapticEffect.GameOver)
         }
@@ -550,7 +710,9 @@ class GameViewModel(
         viewModelScope.launch {
             delay(400)
             _gameState.update { it.copy(clearingCells = emptySet()) }
-            delay(1200)
+            delay(400)
+            _gameState.update { it.copy(lineClearBursts = emptyList()) }
+            delay(600)
             _gameState.update { it.copy(comboBannerText = null, scorePopups = emptyList()) }
         }
 

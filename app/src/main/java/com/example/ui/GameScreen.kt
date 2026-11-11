@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +45,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -92,6 +96,9 @@ fun GameScreen(
     var boardBounds by remember { mutableStateOf<Rect?>(null) }
     var boardCellSizePx by remember { mutableFloatStateOf(0f) }
 
+    // Root coordinate tracking of screen container to account for status/nav bar insets
+    var containerRootTopLeft by remember { mutableStateOf(Offset.Zero) }
+
     // Dragging state
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
     var dragTouchPos by remember { mutableStateOf(Offset.Zero) }
@@ -111,14 +118,27 @@ fun GameScreen(
     // Active dragging shape
     val draggingShape = draggingIndex?.let { gameState.activePieces.getOrNull(it) }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(DarkBackground)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .onGloballyPositioned { coordinates ->
+                containerRootTopLeft = coordinates.boundsInRoot().topLeft
+            }
             .testTag("game_screen")
     ) {
+        val screenWidth = maxWidth
+        val screenHeight = maxHeight
+
+        // Dynamic board sizing:
+        // Reserve vertical space for compact ScoreHeader (~140dp) and PieceDeck (~110dp) + safety margin (20dp)
+        val reservedVerticalDp = 270.dp
+        val maxBoardByHeight = (screenHeight - reservedVerticalDp).coerceAtLeast(220.dp)
+        val maxBoardByWidth = screenWidth - 24.dp
+        val boardSizeDp = minOf(maxBoardByWidth, maxBoardByHeight).coerceIn(240.dp, 400.dp)
+
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -131,14 +151,21 @@ fun GameScreen(
                 comboStreak = gameState.comboStreak,
                 isSoundEnabled = viewModel.soundManager.isSoundEnabled,
                 isHapticsEnabled = viewModel.soundManager.isHapticsEnabled,
+                canUndo = gameState.canUndo,
+                gameMode = gameState.gameMode,
+                dailyGlobalRecord = gameState.dailyGlobalRecord,
+                dailyTargetScore = gameState.dailyTargetScore,
+                dailyStreak = viewModel.getDailyStreak(),
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
                 onShowStats = { showStatsDialog = true },
                 onShowTutorial = { viewModel.openTutorial() },
+                onUndo = { viewModel.undoLastMove() },
+                onSwitchMode = { mode -> viewModel.switchGameMode(mode) },
                 onRestart = { viewModel.startNewGame() }
             )
 
-            // 2. Center Section: 8x8 Game Board
+            // 2. Center Section: 8x8 Game Board (Dynamically sized to guarantee zero vertical clipping)
             val ghostColorId = draggingShape?.colorId
                 ?: gameState.selectedShapeIndex?.let { gameState.activePieces.getOrNull(it)?.colorId }
 
@@ -155,7 +182,7 @@ fun GameScreen(
                     boardBounds = bounds
                     boardCellSizePx = cellSizePx
                 },
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = Modifier.size(boardSizeDp)
             )
 
             // 3. Bottom Section: Active Piece Pool (3 slots)
@@ -171,15 +198,15 @@ fun GameScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(bottom = 4.dp)
+                            .padding(bottom = 2.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color(0xFF1E2640))
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .padding(horizontal = 10.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = "Tap any cell on the grid to place",
                             color = Color(0xFF00E5FF),
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -204,8 +231,9 @@ fun GameScreen(
                         dragTouchPos += delta
                         val bounds = boardBounds
                         val shape = draggingShape
-                        if (bounds != null && shape != null && boardCellSizePx > 0f) {
-                            // Target location of shape top-left anchor
+                        val currentDragging = draggingIndex
+                        if (bounds != null && shape != null && boardCellSizePx > 0f && currentDragging != null) {
+                            // Target location of shape top-left anchor in root coordinates
                             val pieceCenterX = dragTouchPos.x
                             val pieceCenterY = dragTouchPos.y - liftOffsetPx
 
@@ -221,9 +249,9 @@ fun GameScreen(
                             val targetRow = Math.round(relativeY / boardCellSizePx)
 
                             if (targetRow in -1..8 && targetCol in -1..8) {
-                                viewModel.updateHoverPreview(draggingIndex!!, targetRow, targetCol)
+                                viewModel.updateHoverPreview(currentDragging, targetRow, targetCol)
                             } else {
-                                viewModel.updateHoverPreview(draggingIndex!!, null, null)
+                                viewModel.updateHoverPreview(currentDragging, null, null)
                             }
                         }
                     },
@@ -233,16 +261,16 @@ fun GameScreen(
                         val hoverC = gameState.hoverCol
 
                         if (currentDragging != null && hoverR != null && hoverC != null) {
-                            viewModel.placeShape(currentDragging, hoverR, hoverC)
-                        } else {
-                            viewModel.updateHoverPreview(currentDragging ?: 0, null, null)
+                            val placed = viewModel.placeShape(currentDragging, hoverR, hoverC)
+                            if (!placed) {
+                                viewModel.updateHoverPreview(currentDragging, null, null)
+                            }
+                        } else if (currentDragging != null) {
+                            viewModel.updateHoverPreview(currentDragging, null, null)
                         }
                         draggingIndex = null
                     }
                 )
-
-                // 4. Permanent Arcade / Ad Slot at the bottom
-                ArcadeBannerSlot()
             }
         }
 
@@ -251,14 +279,16 @@ fun GameScreen(
             val shape = draggingShape
             val shapeWidthPx = shape.width * boardCellSizePx
             val shapeHeightPx = shape.height * boardCellSizePx
-            val pieceLeftX = dragTouchPos.x - (shapeWidthPx / 2f)
-            val pieceTopY = (dragTouchPos.y - liftOffsetPx) - (shapeHeightPx / 2f)
+            val localTouchX = dragTouchPos.x - containerRootTopLeft.x
+            val localTouchY = dragTouchPos.y - containerRootTopLeft.y
+            val overlayPieceLeftX = localTouchX - (shapeWidthPx / 2f)
+            val overlayPieceTopY = (localTouchY - liftOffsetPx) - (shapeHeightPx / 2f)
 
             val cellUnitDp = with(density) { boardCellSizePx.toDp() }
 
             Box(
                 modifier = Modifier
-                    .offset { IntOffset(pieceLeftX.toInt(), pieceTopY.toInt()) }
+                    .offset { IntOffset(overlayPieceLeftX.toInt(), overlayPieceTopY.toInt()) }
                     .shadow(12.dp)
             ) {
                 ShapeRenderer(
@@ -277,6 +307,11 @@ fun GameScreen(
                 linesCleared = gameState.linesClearedSession,
                 maxCombo = gameState.maxComboSession,
                 secondChanceAvailable = gameState.secondChanceAvailable,
+                canUndo = gameState.canUndo,
+                gameMode = gameState.gameMode,
+                dailyTargetScore = gameState.dailyTargetScore,
+                dailyGlobalRecord = gameState.dailyGlobalRecord,
+                onUndo = { viewModel.undoLastMove() },
                 onSecondChance = { viewModel.useSecondChance() },
                 onRestart = { viewModel.startNewGame() }
             )
@@ -299,53 +334,5 @@ fun GameScreen(
             onDismiss = { viewModel.dismissTutorial() },
             soundManager = viewModel.soundManager
         )
-    }
-}
-
-@Composable
-private fun ArcadeBannerSlot() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                Brush.horizontalGradient(
-                    listOf(
-                        Color(0xFF131728),
-                        Color(0xFF1F263E),
-                        Color(0xFF131728)
-                    )
-                )
-            )
-            .border(1.dp, Color(0xFF283050), RoundedCornerShape(10.dp))
-            .testTag("admob_banner_slot"),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Star,
-                contentDescription = null,
-                tint = Color(0xFFFFD700),
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = "BLOCK BLAST ARENA • MASTER THE COMBOS",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF8E9BB0),
-                letterSpacing = 0.5.sp
-            )
-            Icon(
-                imageVector = Icons.Default.Star,
-                contentDescription = null,
-                tint = Color(0xFFFFD700),
-                modifier = Modifier.size(16.dp)
-            )
-        }
     }
 }

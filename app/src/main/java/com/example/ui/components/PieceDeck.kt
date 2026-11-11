@@ -18,6 +18,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -54,42 +57,40 @@ fun PieceSlot(
     modifier: Modifier = Modifier
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var slotRootTopLeft by remember { mutableStateOf(Offset.Zero) }
 
     Box(
         modifier = modifier
-            .height(115.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .height(96.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(BoardBackground)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
                 color = if (isSelected) Color(0xFF00E5FF) else BoardBorder,
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(12.dp)
             )
             .testTag("piece_slot_$index"),
         contentAlignment = Alignment.Center
     ) {
-        if (shape != null && !isDragging) {
+        if (shape != null) {
             val scale by animateFloatAsState(
                 targetValue = if (isSelected) 1.08f else 1.0f,
                 label = "slotScale_$index"
             )
 
-            var slotRootBounds = Offset.Zero
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .scale(scale)
-                    .alpha(if (canFit) 1.0f else 0.38f)
                     .onGloballyPositioned { coordinates ->
                         val bounds = coordinates.boundsInRoot()
-                        slotRootBounds = bounds.center
+                        slotRootTopLeft = bounds.topLeft
                     }
                     .pointerInput(shape.instanceId) {
                         detectDragGestures(
                             onDragStart = { localOffset ->
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                onDragStart(index, slotRootBounds + localOffset)
+                                onDragStart(index, slotRootTopLeft + localOffset)
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
@@ -100,7 +101,7 @@ fun PieceSlot(
                         )
                     }
                     .clickable {
-                        if (canFit) {
+                        if (canFit && !isDragging) {
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                             if (isSelected) {
                                 onSelectPiece(null)
@@ -111,25 +112,32 @@ fun PieceSlot(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                ShapeRenderer(
-                    shape = shape,
-                    cellUnitDp = 20.dp
-                )
+                // When dragging, keep this Box mounted to sustain pointerInput events while hiding the static piece
+                Box(
+                    modifier = Modifier.alpha(
+                        if (isDragging) 0f else if (canFit) 1.0f else 0.38f
+                    )
+                ) {
+                    ShapeRenderer(
+                        shape = shape,
+                        cellUnitDp = 18.dp
+                    )
+                }
             }
 
-            if (!canFit) {
+            if (!canFit && !isDragging) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 6.dp)
+                        .padding(bottom = 4.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(Color(0xCC000000))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = "NO FIT",
                         color = Color(0xFFFF5252),
-                        fontSize = 9.sp,
+                        fontSize = 8.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -156,9 +164,9 @@ fun PieceDeck(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(130.dp)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .height(106.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         for (i in 0 until 3) {

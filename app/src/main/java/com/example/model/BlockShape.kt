@@ -216,16 +216,17 @@ object ShapeDefinitions {
         Triple("diag_2", DIAG_2, 8)
     )
 
-    fun getRandomShapeBatch(): List<BlockShape> {
+    fun getShapeBatch(random: Random): List<BlockShape> {
         val result = mutableListOf<BlockShape>()
         var hasSmallPiece = false
 
         for (i in 0 until 3) {
             val candidate = if (i == 2 && !hasSmallPiece) {
-                // Ensure at least one small piece (< 4 blocks) in the batch
-                ALL_SHAPES_WITH_COLOR.filter { it.second.sumOf { r -> r.count { cell -> cell } } <= 3 }.random()
+                // Ensure at least one small piece (<= 3 blocks) in the batch
+                val smalls = ALL_SHAPES_WITH_COLOR.filter { it.second.sumOf { r -> r.count { cell -> cell } } <= 3 }
+                smalls[random.nextInt(smalls.size)]
             } else {
-                ALL_SHAPES_WITH_COLOR.random()
+                ALL_SHAPES_WITH_COLOR[random.nextInt(ALL_SHAPES_WITH_COLOR.size)]
             }
 
             val cells = candidate.second.sumOf { r -> r.count { it } }
@@ -241,5 +242,18 @@ object ShapeDefinitions {
             )
         }
         return result
+    }
+
+    fun getRandomShapeBatch(): List<BlockShape> {
+        return getShapeBatch(Random.Default)
+    }
+
+    /**
+     * Deterministic batch generation for Daily Challenge mode.
+     * Given the same dateSeed and batchIndex, all players globally receive the identical pieces.
+     */
+    fun getDailyShapeBatch(dateSeed: Long, batchIndex: Int): List<BlockShape> {
+        val seededRandom = Random(dateSeed + (batchIndex * 1337L))
+        return getShapeBatch(seededRandom)
     }
 }

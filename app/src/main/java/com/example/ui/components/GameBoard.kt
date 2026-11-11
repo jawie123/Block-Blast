@@ -129,10 +129,8 @@ fun GridBoard(
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
             .shadow(
-                elevation = if (streak > 0 || isHighScoreStreak) 22.dp else 14.dp,
+                elevation = if (streak > 0 || isHighScoreStreak) 20.dp else 12.dp,
                 shape = RoundedCornerShape(16.dp),
                 spotColor = animGlowColor
             )
@@ -147,9 +145,8 @@ fun GridBoard(
     ) {
         BoxWithConstraints(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp)
-                .aspectRatio(1f)
+                .fillMaxSize()
+                .padding(6.dp)
                 .onGloballyPositioned { coordinates ->
                     val bounds = coordinates.boundsInRoot()
                     val cellSizePx = bounds.width / 8f
@@ -218,6 +215,12 @@ fun GridBoard(
                     }
                 }
             }
+
+            // Line Clear Particle System (Exploding crystal shards, star sparkles, and laser streaks)
+            LineClearParticleSystem(
+                bursts = gameState.lineClearBursts,
+                cellSizePx = constraints.maxWidth / 8f
+            )
 
             // Score Popups Floating Layer
             for (popup in gameState.scorePopups) {

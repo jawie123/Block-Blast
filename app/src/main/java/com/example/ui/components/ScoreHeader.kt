@@ -17,16 +17,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeMute
 import androidx.compose.material.icons.filled.VolumeUp
+import com.example.model.GameMode
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,19 +56,26 @@ fun ScoreHeader(
     comboStreak: Int,
     isSoundEnabled: Boolean,
     isHapticsEnabled: Boolean,
+    canUndo: Boolean = false,
+    gameMode: GameMode = GameMode.CLASSIC,
+    dailyGlobalRecord: Int = 8540,
+    dailyTargetScore: Int = 5000,
+    dailyStreak: Int = 0,
     onToggleSound: () -> Unit,
     onToggleHaptics: () -> Unit,
     onShowStats: () -> Unit,
     onShowTutorial: () -> Unit = {},
+    onUndo: () -> Unit = {},
+    onSwitchMode: (GameMode) -> Unit = {},
     onRestart: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = 12.dp, vertical = 2.dp)
     ) {
-        // Top Toolbar: Sound, Haptics, Stats, Restart
+        // Top Toolbar: Brand & Quick Controls
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -73,12 +84,12 @@ fun ScoreHeader(
             // App Title / Brand
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(6.dp))
                         .background(
                             Brush.linearGradient(
                                 listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF))
@@ -89,99 +100,259 @@ fun ScoreHeader(
                     Text(
                         text = "8x8",
                         color = Color.White,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
                 Text(
                     text = "BLOCK BLAST",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                     fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp
+                    letterSpacing = 0.8.sp
                 )
             }
 
-            // Controls
+            // Controls Toolbar (Compact 30dp buttons)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
                     onClick = onToggleSound,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(30.dp)
                         .testTag("toggle_sound_button")
                 ) {
                     Icon(
                         imageVector = if (isSoundEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
                         contentDescription = if (isSoundEnabled) "Mute sound" else "Enable sound",
                         tint = if (isSoundEnabled) Color(0xFF00E5FF) else Color.Gray,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
 
                 IconButton(
                     onClick = onToggleHaptics,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(30.dp)
                         .testTag("toggle_haptics_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Vibration,
                         contentDescription = if (isHapticsEnabled) "Disable vibration" else "Enable vibration",
                         tint = if (isHapticsEnabled) Color(0xFFFF9800) else Color.Gray,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
 
                 IconButton(
                     onClick = onShowStats,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(30.dp)
                         .testTag("stats_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.BarChart,
                         contentDescription = "Statistics",
                         tint = Color(0xFFB47CFF),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
 
                 IconButton(
                     onClick = onShowTutorial,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(30.dp)
                         .testTag("help_tutorial_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Info,
                         contentDescription = "How to Play Tutorial",
                         tint = Color(0xFF00E5FF),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onUndo,
+                    enabled = canUndo,
+                    modifier = Modifier
+                        .size(30.dp)
+                        .then(
+                            if (canUndo) {
+                                Modifier
+                                    .background(Color(0x3300E5FF), CircleShape)
+                                    .border(1.dp, Color(0xFF00E5FF), CircleShape)
+                            } else Modifier
+                        )
+                        .testTag("undo_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Undo,
+                        contentDescription = "Undo Last Move",
+                        tint = if (canUndo) Color(0xFF00E5FF) else Color.Gray.copy(alpha = 0.35f),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
 
                 IconButton(
                     onClick = onRestart,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(30.dp)
                         .testTag("restart_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Restart Game",
                         tint = Color.White.copy(alpha = 0.85f),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Scores Banner
+        // Mode Switcher: Classic vs Daily Challenge
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(9.dp))
+                .background(Color(0xFF101424))
+                .border(1.dp, BoardBorder, RoundedCornerShape(9.dp))
+                .padding(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            val isClassic = gameMode == GameMode.CLASSIC
+            // Classic Tab
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(25.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(
+                        if (isClassic) {
+                            Brush.horizontalGradient(listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF)))
+                        } else {
+                            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                        }
+                    )
+                    .clickable { onSwitchMode(GameMode.CLASSIC) }
+                    .testTag("mode_tab_classic"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "CLASSIC",
+                    fontSize = 10.sp,
+                    fontWeight = if (isClassic) FontWeight.Black else FontWeight.Bold,
+                    color = if (isClassic) Color.White else Color(0xFF8E9BB0),
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            // Daily Challenge Tab
+            val isDaily = gameMode == GameMode.DAILY_CHALLENGE
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(25.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(
+                        if (isDaily) {
+                            Brush.horizontalGradient(listOf(Color(0xFFFF9800), Color(0xFFFFD600)))
+                        } else {
+                            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                        }
+                    )
+                    .clickable { onSwitchMode(GameMode.DAILY_CHALLENGE) }
+                    .testTag("mode_tab_daily"),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CalendarToday,
+                        contentDescription = null,
+                        tint = if (isDaily) Color(0xFF0F111E) else Color(0xFFFF9800),
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Text(
+                        text = "DAILY CHALLENGE",
+                        fontSize = 10.sp,
+                        fontWeight = if (isDaily) FontWeight.Black else FontWeight.Bold,
+                        color = if (isDaily) Color(0xFF0F111E) else Color(0xFF8E9BB0),
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+        }
+
+        // Daily Challenge Info Banner (Compact inline strip)
+        if (gameMode == GameMode.DAILY_CHALLENGE) {
+            Spacer(modifier = Modifier.height(3.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF261A08), Color(0xFF1B1428))
+                        )
+                    )
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(listOf(Color(0xFFFFD700), Color(0xFFFF9800))),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .testTag("daily_challenge_banner")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EmojiEvents,
+                            contentDescription = null,
+                            tint = GoldAccent,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "RECORD: $dailyGlobalRecord",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = GoldAccent
+                        )
+                    }
+
+                    Text(
+                        text = "TARGET: $dailyTargetScore",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF00E5FF)
+                    )
+
+                    Text(
+                        text = "🔥 ${dailyStreak}d STREAK",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFFFFB74D)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Scores Banner: Score, Combo & High Score in a clean, tight row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -191,13 +362,15 @@ fun ScoreHeader(
             Column {
                 Text(
                     text = "SCORE",
-                    style = MaterialTheme.typography.labelLarge,
+                    fontSize = 9.sp,
                     color = Color(0xFF8E9BB0),
-                    letterSpacing = 1.sp
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp
                 )
                 Text(
                     text = "$score",
-                    style = MaterialTheme.typography.displayLarge,
+                    fontSize = 30.sp,
+                    lineHeight = 32.sp,
                     color = Color.White,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.testTag("current_score_text")
@@ -207,7 +380,7 @@ fun ScoreHeader(
             // High Score & Combo Streak
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // Combo Streak Pill
                 AnimatedVisibility(
@@ -217,20 +390,20 @@ fun ScoreHeader(
                 ) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(
                                 Brush.horizontalGradient(
                                     listOf(Color(0xFFFF5252), Color(0xFFFF9800))
                                 )
                             )
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
                             .testTag("combo_streak_pill"),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "🔥 x$comboStreak COMBO",
+                            text = "🔥 x$comboStreak",
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Black
                         )
                     }
@@ -239,33 +412,33 @@ fun ScoreHeader(
                 // Best High Score Pill
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(BoardBackground)
-                        .border(1.dp, BoardBorder, RoundedCornerShape(16.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .border(1.dp, BoardBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                         .testTag("high_score_pill")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.EmojiEvents,
                             contentDescription = "High Score",
                             tint = GoldAccent,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                         Column {
                             Text(
-                                text = "BEST",
-                                fontSize = 10.sp,
+                                text = if (gameMode == GameMode.DAILY_CHALLENGE) "RECORD" else "BEST",
+                                fontSize = 8.sp,
                                 color = GoldAccent,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.5.sp
                             )
                             Text(
                                 text = "$highScore",
-                                fontSize = 16.sp,
+                                fontSize = 14.sp,
                                 color = Color.White,
                                 fontWeight = FontWeight.ExtraBold
                             )
@@ -275,7 +448,7 @@ fun ScoreHeader(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Visual Combo Streak Meter displaying multiplier and consecutive clear progress
         ComboStreakMeter(

@@ -122,59 +122,46 @@ fun ComboStreakMeter(
     Box(
         modifier = modifier
             .testTag("combo_streak_meter")
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(BoardBackground)
-            .border(1.dp, animatedBorderColor, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .border(1.dp, animatedBorderColor, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Header: Status title and Active Multiplier Badge
+            // Header: Status title and Active Multiplier Badge in single compact row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left: Icon + Label + Subtitle
+                // Left: Icon + Label
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
                         imageVector = if (isStreakActive) Icons.Default.LocalFireDepartment else Icons.Default.Bolt,
                         contentDescription = "Combo Streak Icon",
                         tint = if (isStreakActive) activeColor else Color(0xFF6B7894),
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Column {
-                        Text(
-                            text = if (isStreakActive) "COMBO STREAK" else "COMBO METER",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isStreakActive) Color.White else Color(0xFF8E9BB0),
-                            letterSpacing = 0.8.sp
-                        )
-                        Text(
-                            text = when {
-                                comboStreak == 0 -> "Clear lines to build multiplier"
-                                comboStreak == 1 -> "1 Line Clear • Streak Active!"
-                                comboStreak in 2..4 -> "${comboStreak}x Line Streak! 🔥"
-                                else -> "ULTRA STREAK x$comboStreak 👑"
-                            },
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isStreakActive) activeColor else Color(0xFF5E6B85)
-                        )
-                    }
+                    Text(
+                        text = if (isStreakActive) "COMBO x$comboStreak" else "COMBO METER",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (isStreakActive) Color.White else Color(0xFF8E9BB0),
+                        letterSpacing = 0.6.sp
+                    )
                 }
 
-                // Right: Multiplier Badge
+                // Right: Compact Multiplier Badge
                 Box(
                     modifier = Modifier
                         .scale(if (isStreakActive) pulseScale else 1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(
                             if (isStreakActive) {
                                 Brush.horizontalGradient(activeGradient)
@@ -187,34 +174,30 @@ fun ComboStreakMeter(
                         .border(
                             width = 1.dp,
                             color = if (isStreakActive) Color.White.copy(alpha = 0.6f) else BoardBorder,
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(6.dp)
                         )
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                         .testTag("multiplier_badge"),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         if (isStreakActive) {
                             Icon(
                                 imageVector = Icons.Default.Bolt,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(13.dp)
+                                modifier = Modifier.size(11.dp)
                             )
                         }
                         Text(
-                            text = if (isStreakActive) {
-                                "${activeMultiplier}x MULTIPLIER"
-                            } else {
-                                "1x BASE"
-                            },
+                            text = if (isStreakActive) "${activeMultiplier}x MULTIPLIER" else "1x BASE",
                             color = if (isStreakActive) Color.White else Color(0xFF8E9BB0),
-                            fontSize = 11.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Black,
-                            letterSpacing = 0.4.sp
+                            letterSpacing = 0.3.sp
                         )
                     }
                 }
@@ -223,7 +206,7 @@ fun ComboStreakMeter(
             // 5 Segmented Progress Bars
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 for (i in 0 until 5) {
@@ -233,8 +216,8 @@ fun ComboStreakMeter(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
                             .background(
                                 if (isFilled) {
                                     Brush.horizontalGradient(TierGradients[i])
@@ -251,7 +234,7 @@ fun ComboStreakMeter(
                                     isFilled -> TierPrimaryColors[i].copy(alpha = 0.5f)
                                     else -> Color(0xFF222944)
                                 },
-                                shape = RoundedCornerShape(4.dp)
+                                shape = RoundedCornerShape(3.dp)
                             )
                     ) {
                         // Specular shine for filled segments
@@ -259,8 +242,8 @@ fun ComboStreakMeter(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(3.dp)
-                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
                                     .background(Color.White.copy(alpha = 0.35f))
                             )
                         }
@@ -271,7 +254,7 @@ fun ComboStreakMeter(
             // Labels below segments showing the 5 multiplier levels
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 for (i in 0 until 5) {
@@ -282,7 +265,7 @@ fun ComboStreakMeter(
                         text = TierLabels[i],
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
-                        fontSize = 9.sp,
+                        fontSize = 8.sp,
                         fontWeight = if (isCurrentPeak) FontWeight.Black else FontWeight.Bold,
                         color = when {
                             isCurrentPeak -> TierPrimaryColors[i]

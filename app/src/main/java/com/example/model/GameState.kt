@@ -9,6 +9,21 @@ data class ScorePopup(
     val comboMultiplier: Int = 1
 )
 
+enum class GameMode {
+    CLASSIC,
+    DAILY_CHALLENGE
+}
+
+data class LineClearBurst(
+    val id: Long = System.nanoTime() + (0..9999).random(),
+    val row: Int,
+    val col: Int,
+    val colorId: Int,
+    val comboMultiplier: Int = 1,
+    val isRowClear: Boolean = false,
+    val isColClear: Boolean = false
+)
+
 data class GameState(
     val grid: List<List<Int>> = List(8) { List(8) { 0 } },
     val activePieces: List<BlockShape?> = emptyList(),
@@ -27,6 +42,14 @@ data class GameState(
     val prospectiveRows: Set<Int> = emptySet(),
     val prospectiveCols: Set<Int> = emptySet(),
     val clearingCells: Set<Pair<Int, Int>> = emptySet(),
+    val lineClearBursts: List<LineClearBurst> = emptyList(),
     val comboBannerText: String? = null,
-    val scorePopups: List<ScorePopup> = emptyList()
+    val scorePopups: List<ScorePopup> = emptyList(),
+    val gameMode: GameMode = GameMode.CLASSIC,
+    val dailyDate: String = "",
+    val dailyFormattedDate: String = "",
+    val dailyBatchIndex: Int = 0,
+    val dailyTargetScore: Int = 5000,
+    val dailyGlobalRecord: Int = 8540,
+    val canUndo: Boolean = false
 )
