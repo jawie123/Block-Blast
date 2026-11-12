@@ -58,6 +58,26 @@ class GamePreferences(context: Context) {
         return prefs.getString(KEY_DAILY_HISTORY, "") ?: ""
     }
 
+    var hammerCount: Int
+        get() = prefs.getInt(KEY_HAMMER_COUNT, 3)
+        set(value) = prefs.edit().putInt(KEY_HAMMER_COUNT, value).apply()
+
+    fun getMissionProgress(missionId: String): Int {
+        return prefs.getInt("mission_prog_$missionId", 0)
+    }
+
+    fun setMissionProgress(missionId: String, value: Int) {
+        prefs.edit().putInt("mission_prog_$missionId", value).apply()
+    }
+
+    fun isMissionClaimed(missionId: String): Boolean {
+        return prefs.getBoolean("mission_claimed_$missionId", false)
+    }
+
+    fun setMissionClaimed(missionId: String, claimed: Boolean) {
+        prefs.edit().putBoolean("mission_claimed_$missionId", claimed).apply()
+    }
+
     fun recordDailyGame(date: String, score: Int) {
         setDailyHighScore(date, score)
         val history = getDailyHistory()
@@ -79,5 +99,6 @@ class GamePreferences(context: Context) {
         private const val KEY_DAILY_LAST_DATE = "key_daily_last_date"
         private const val KEY_DAILY_STREAK = "key_daily_streak"
         private const val KEY_DAILY_HISTORY = "key_daily_history"
+        private const val KEY_HAMMER_COUNT = "key_hammer_count"
     }
 }

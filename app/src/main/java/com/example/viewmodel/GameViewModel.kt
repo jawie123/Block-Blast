@@ -8,9 +8,12 @@ import com.example.audio.HapticEffect
 import com.example.audio.SoundManager
 import com.example.data.GamePreferences
 import com.example.model.BlockShape
+import com.example.model.DailyMission
+import com.example.model.DailyMissionGenerator
 import com.example.model.GameMode
 import com.example.model.GameState
 import com.example.model.LineClearBurst
+import com.example.model.MissionType
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
 import java.text.SimpleDateFormat
@@ -104,7 +107,8 @@ class GameViewModel(
         val linesClearedSession: Int,
         val isGameOver: Boolean,
         val isNewHighScore: Boolean,
-        val dailyBatchIndex: Int
+        val dailyBatchIndex: Int,
+        val hammerCount: Int = 3
     )
 
     private var lastUndoSnapshot: UndoSnapshot? = null
@@ -151,6 +155,10 @@ class GameViewModel(
         val targetScore = 4500 + ((seed % 1000).toInt())
         val globalRecord = 8400 + ((seed % 1600).toInt())
 
+        val currentHammers = preferences.hammerCount
+        val dailyMissions = loadDailyMissions(dateStr)
+        val unclaimedCount = dailyMissions.count { it.isCompleted && !it.isClaimed }
+
         _gameState.value = GameState(
             grid = List(8) { List(8) { 0 } },
             activePieces = initialShapes,
@@ -175,7 +183,11 @@ class GameViewModel(
             dailyBatchIndex = 0,
             dailyTargetScore = targetScore,
             dailyGlobalRecord = globalRecord,
-            canUndo = false
+            canUndo = false,
+            hammerCount = currentHammers,
+            isHammerActive = false,
+            dailyMissions = dailyMissions,
+            unclaimedMissionsCount = unclaimedCount
         )
     }
 
@@ -186,11 +198,13 @@ class GameViewModel(
 
     /**
      * Reverts the last piece placement, restoring the previous grid state, score,
-     * piece pool, and combo streak.
+     * piece pool, combo streak, and hammer count.
      */
     fun undoLastMove(): Boolean {
         val snapshot = lastUndoSnapshot ?: return false
         lastUndoSnapshot = null
+
+        preferences.hammerCount = snapshot.hammerCount
 
         _gameState.update {
             it.copy(
@@ -204,6 +218,8 @@ class GameViewModel(
                 isGameOver = snapshot.isGameOver,
                 isNewHighScore = snapshot.isNewHighScore,
                 dailyBatchIndex = snapshot.dailyBatchIndex,
+                hammerCount = snapshot.hammerCount,
+                isHammerActive = false,
                 selectedShapeIndex = null,
                 hoverRow = null,
                 hoverCol = null,
@@ -463,7 +479,8 @@ class GameViewModel(
             linesClearedSession = currentState.linesClearedSession,
             isGameOver = currentState.isGameOver,
             isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex
+            dailyBatchIndex = currentState.dailyBatchIndex,
+            hammerCount = currentState.hammerCount
         )
 
         // Place cells onto grid
@@ -706,6 +723,14 @@ class GameViewModel(
             triggerHaptic(HapticEffect.GameOver)
         }
 
+        // Record progress towards Daily Missions
+        recordMissionEvent(MissionType.PLACE_BLOCKS, 1)
+        if (totalLines > 0) {
+            recordMissionEvent(MissionType.CLEAR_LINES, totalLines)
+            recordMissionEvent(MissionType.REACH_COMBO, newCombo)
+        }
+        recordMissionEvent(MissionType.SCORE_POINTS, totalMovePoints)
+
         // Reset clearing animation and popup after brief duration
         viewModelScope.launch {
             delay(400)
@@ -762,6 +787,237 @@ class GameViewModel(
             delay(1800)
             _gameState.update { it.copy(comboBannerText = null) }
         }
+    }
+
+    /**
+     * Toggles the Hammer power-up targeting mode.
+     */
+    fun toggleHammerMode() {
+        val current = _gameState.value
+        if (current.hammerCount <= 0 && !current.isHammerActive) {
+            _gameState.update { it.copy(comboBannerText = "NO HAMMERS LEFT! COMPLETE DAILY MISSIONS") }
+            viewModelScope.launch {
+                delay(1500)
+                _gameState.update { it.copy(comboBannerText = null) }
+            }
+            return
+        }
+
+        val willBeActive = !current.isHammerActive
+        _gameState.update {
+            it.copy(
+                isHammerActive = willBeActive,
+                selectedShapeIndex = if (willBeActive) null else it.selectedShapeIndex,
+                comboBannerText = if (willBeActive) "HAMMER ACTIVE: TAP ANY FILLED BLOCK!" else null
+            )
+        }
+
+        if (willBeActive) {
+            soundManager.playPickup()
+            triggerHaptic(HapticEffect.Pickup)
+        }
+    }
+
+    /**
+     * Rescues the player directly from the Game Over modal by activating Hammer mode.
+     */
+    fun activateHammerFromGameOver() {
+        val current = _gameState.value
+        if (current.hammerCount <= 0) return
+
+        _gameState.update {
+            it.copy(
+                isGameOver = false,
+                isHammerActive = true,
+                selectedShapeIndex = null,
+                comboBannerText = "HAMMER RESCUE: TAP A BLOCK TO SMASH & CONTINUE!"
+            )
+        }
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+    }
+
+    /**
+     * Uses 1 hammer power-up to smash and clear a single filled block at (row, col).
+     */
+    fun useHammerOnCell(row: Int, col: Int): Boolean {
+        val currentState = _gameState.value
+        if (!currentState.isHammerActive || currentState.hammerCount <= 0) return false
+        val cellColor = currentState.grid.getOrNull(row)?.getOrNull(col) ?: 0
+        if (cellColor == 0) return false // can only smash filled blocks
+
+        // Record Undo snapshot before smashing
+        lastUndoSnapshot = UndoSnapshot(
+            grid = currentState.grid,
+            activePieces = currentState.activePieces,
+            score = currentState.score,
+            highScore = currentState.highScore,
+            comboStreak = currentState.comboStreak,
+            maxComboSession = currentState.maxComboSession,
+            linesClearedSession = currentState.linesClearedSession,
+            isGameOver = currentState.isGameOver,
+            isNewHighScore = currentState.isNewHighScore,
+            dailyBatchIndex = currentState.dailyBatchIndex,
+            hammerCount = currentState.hammerCount
+        )
+
+        // Smash the single cell
+        val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
+        newGrid[row][col] = 0
+        val frozenGrid = newGrid.map { it.toList() }
+
+        val newHammerCount = (currentState.hammerCount - 1).coerceAtLeast(0)
+        preferences.hammerCount = newHammerCount
+
+        // Sound, haptics, particle burst
+        soundManager.playHammerSmash()
+        triggerHaptic(HapticEffect.HammerSmash)
+
+        val burst = LineClearBurst(
+            row = row,
+            col = col,
+            colorId = cellColor,
+            comboMultiplier = 1,
+            isRowClear = true,
+            isColClear = true
+        )
+
+        // Re-check game over state now that the block is removed
+        val stillGameOver = checkGameOver(frozenGrid, currentState.activePieces)
+
+        _gameState.update {
+            it.copy(
+                grid = frozenGrid,
+                hammerCount = newHammerCount,
+                isHammerActive = false,
+                isGameOver = stillGameOver,
+                lineClearBursts = listOf(burst),
+                comboBannerText = "BLOCK SMASHED! 🔨",
+                canUndo = true
+            )
+        }
+
+        recordMissionEvent(MissionType.USE_HAMMER, 1)
+
+        viewModelScope.launch {
+            delay(400)
+            _gameState.update { it.copy(lineClearBursts = emptyList()) }
+            delay(800)
+            _gameState.update { it.copy(comboBannerText = null) }
+        }
+
+        return true
+    }
+
+    /**
+     * Loads the 3 deterministic daily missions for the given date from preferences.
+     */
+    fun loadDailyMissions(dateStr: String): List<DailyMission> {
+        val baseMissions = DailyMissionGenerator.generateMissionsForDate(dateStr)
+        return baseMissions.map { mission ->
+            val progress = preferences.getMissionProgress(mission.id)
+            val claimed = preferences.isMissionClaimed(mission.id)
+            mission.copy(
+                current = progress,
+                isCompleted = progress >= mission.target,
+                isClaimed = claimed
+            )
+        }
+    }
+
+    /**
+     * Refreshes the daily missions state from storage.
+     */
+    fun refreshDailyMissions() {
+        val dateStr = getTodayDateString()
+        val missions = loadDailyMissions(dateStr)
+        val unclaimed = missions.count { it.isCompleted && !it.isClaimed }
+        _gameState.update {
+            it.copy(
+                dailyMissions = missions,
+                unclaimedMissionsCount = unclaimed
+            )
+        }
+    }
+
+    /**
+     * Increments mission progress for the active day and persists to preferences.
+     */
+    fun recordMissionEvent(type: MissionType, amount: Int) {
+        val dateStr = getTodayDateString()
+        val currentMissions = _gameState.value.dailyMissions.ifEmpty {
+            loadDailyMissions(dateStr)
+        }
+
+        var stateChanged = false
+        val updated = currentMissions.map { mission ->
+            if (mission.type == type && !mission.isClaimed) {
+                val newProgress = when (type) {
+                    MissionType.REACH_COMBO -> maxOf(mission.current, amount)
+                    else -> mission.current + amount
+                }.coerceAtMost(mission.target)
+
+                if (newProgress != mission.current) {
+                    stateChanged = true
+                    preferences.setMissionProgress(mission.id, newProgress)
+                    mission.copy(
+                        current = newProgress,
+                        isCompleted = newProgress >= mission.target
+                    )
+                } else {
+                    mission
+                }
+            } else {
+                mission
+            }
+        }
+
+        if (stateChanged) {
+            val unclaimed = updated.count { it.isCompleted && !it.isClaimed }
+            _gameState.update {
+                it.copy(
+                    dailyMissions = updated,
+                    unclaimedMissionsCount = unclaimed
+                )
+            }
+        }
+    }
+
+    /**
+     * Claims the hammer reward for a completed daily mission.
+     */
+    fun claimMissionReward(missionId: String): Boolean {
+        val currentState = _gameState.value
+        val mission = currentState.dailyMissions.find { it.id == missionId } ?: return false
+        if (!mission.isCompleted || mission.isClaimed) return false
+
+        preferences.setMissionClaimed(missionId, true)
+        val newHammerCount = currentState.hammerCount + mission.hammerReward
+        preferences.hammerCount = newHammerCount
+
+        val updatedMissions = currentState.dailyMissions.map {
+            if (it.id == missionId) it.copy(isClaimed = true) else it
+        }
+        val unclaimed = updatedMissions.count { it.isCompleted && !it.isClaimed }
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        _gameState.update {
+            it.copy(
+                hammerCount = newHammerCount,
+                dailyMissions = updatedMissions,
+                unclaimedMissionsCount = unclaimed,
+                comboBannerText = "+${mission.hammerReward} 🔨 REWARD CLAIMED!"
+            )
+        }
+
+        viewModelScope.launch {
+            delay(1500)
+            _gameState.update { it.copy(comboBannerText = null) }
+        }
+
+        return true
     }
 
     companion object {

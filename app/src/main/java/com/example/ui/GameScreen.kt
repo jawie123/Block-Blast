@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.example.audio.AppHaptics
 import com.example.audio.HapticEffect
 import com.example.model.BlockShape
+import com.example.ui.components.DailyMissionsDialog
 import com.example.ui.components.GridBoard
 import com.example.ui.components.GameOverDialog
 import com.example.ui.components.PieceDeck
@@ -91,6 +92,7 @@ fun GameScreen(
 
     // Dialog state
     var showStatsDialog by remember { mutableStateOf(false) }
+    var showMissionsDialog by remember { mutableStateOf(false) }
 
     // Board layout tracking for drag and drop
     var boardBounds by remember { mutableStateOf<Rect?>(null) }
@@ -156,11 +158,16 @@ fun GameScreen(
                 dailyGlobalRecord = gameState.dailyGlobalRecord,
                 dailyTargetScore = gameState.dailyTargetScore,
                 dailyStreak = viewModel.getDailyStreak(),
+                hammerCount = gameState.hammerCount,
+                isHammerActive = gameState.isHammerActive,
+                unclaimedMissions = gameState.unclaimedMissionsCount,
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
                 onShowStats = { showStatsDialog = true },
                 onShowTutorial = { viewModel.openTutorial() },
                 onUndo = { viewModel.undoLastMove() },
+                onToggleHammer = { viewModel.toggleHammerMode() },
+                onShowMissions = { showMissionsDialog = true },
                 onSwitchMode = { mode -> viewModel.switchGameMode(mode) },
                 onRestart = { viewModel.startNewGame() }
             )
@@ -173,9 +180,13 @@ fun GameScreen(
                 gameState = gameState,
                 ghostColorId = ghostColorId,
                 onCellTapped = { row, col ->
-                    val selectedIndex = gameState.selectedShapeIndex
-                    if (selectedIndex != null) {
-                        viewModel.placeShape(selectedIndex, row, col)
+                    if (gameState.isHammerActive) {
+                        viewModel.useHammerOnCell(row, col)
+                    } else {
+                        val selectedIndex = gameState.selectedShapeIndex
+                        if (selectedIndex != null) {
+                            viewModel.placeShape(selectedIndex, row, col)
+                        }
                     }
                 },
                 onBoardPositioned = { bounds, cellSizePx ->
@@ -190,9 +201,32 @@ fun GameScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Hammer mode active banner
+                AnimatedVisibility(
+                    visible = gameState.isHammerActive,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(bottom = 2.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFFFFB300), Color(0xFFFF6F00))))
+                            .clickable { viewModel.toggleHammerMode() }
+                            .padding(horizontal = 10.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "🔨 TAP ANY FILLED BLOCK TO SMASH (OR TAP TO CANCEL)",
+                            color = Color.Black,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
                 // Tap mode instruction if a piece is selected
                 AnimatedVisibility(
-                    visible = gameState.selectedShapeIndex != null,
+                    visible = gameState.selectedShapeIndex != null && !gameState.isHammerActive,
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
@@ -311,9 +345,21 @@ fun GameScreen(
                 gameMode = gameState.gameMode,
                 dailyTargetScore = gameState.dailyTargetScore,
                 dailyGlobalRecord = gameState.dailyGlobalRecord,
+                hammerCount = gameState.hammerCount,
                 onUndo = { viewModel.undoLastMove() },
                 onSecondChance = { viewModel.useSecondChance() },
+                onUseHammer = { viewModel.activateHammerFromGameOver() },
                 onRestart = { viewModel.startNewGame() }
+            )
+        }
+
+        // Daily Missions Dialog
+        if (showMissionsDialog) {
+            DailyMissionsDialog(
+                missions = gameState.dailyMissions,
+                hammerCount = gameState.hammerCount,
+                onClaimReward = { missionId -> viewModel.claimMissionReward(missionId) },
+                onDismiss = { showMissionsDialog = false }
             )
         }
 

@@ -66,8 +66,10 @@ fun GameOverDialog(
     gameMode: GameMode = GameMode.CLASSIC,
     dailyTargetScore: Int = 5000,
     dailyGlobalRecord: Int = 8540,
+    hammerCount: Int = 0,
     onUndo: () -> Unit = {},
     onSecondChance: () -> Unit,
+    onUseHammer: () -> Unit = {},
     onRestart: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -309,6 +311,55 @@ fun GameOverDialog(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Hammer Rescue Button (Smash single blocking block)
+                if (hammerCount > 0) {
+                    Button(
+                        onClick = onUseHammer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("dialog_use_hammer_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            Color(0xFFFFB300),
+                                            Color(0xFFFF8F00),
+                                            Color(0xFFFF6F00)
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "🔨",
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    text = "SMASH A BLOCK ($hammerCount left)",
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 13.sp,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
 
                 // Daily Challenge result card

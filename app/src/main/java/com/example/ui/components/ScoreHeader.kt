@@ -61,11 +61,16 @@ fun ScoreHeader(
     dailyGlobalRecord: Int = 8540,
     dailyTargetScore: Int = 5000,
     dailyStreak: Int = 0,
+    hammerCount: Int = 3,
+    isHammerActive: Boolean = false,
+    unclaimedMissions: Int = 0,
     onToggleSound: () -> Unit,
     onToggleHaptics: () -> Unit,
     onShowStats: () -> Unit,
     onShowTutorial: () -> Unit = {},
     onUndo: () -> Unit = {},
+    onToggleHammer: () -> Unit = {},
+    onShowMissions: () -> Unit = {},
     onSwitchMode: (GameMode) -> Unit = {},
     onRestart: () -> Unit,
     modifier: Modifier = Modifier
@@ -375,6 +380,105 @@ fun ScoreHeader(
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.testTag("current_score_text")
                 )
+            }
+
+            // Power-ups & Missions Quick Bar
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Hammer Power-up Button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isHammerActive) {
+                                Brush.horizontalGradient(
+                                    listOf(Color(0xFFFFD54F), Color(0xFFFF9800))
+                                )
+                            } else {
+                                Brush.horizontalGradient(
+                                    listOf(Color(0xFF1E2235), Color(0xFF161928))
+                                )
+                            }
+                        )
+                        .border(
+                            width = if (isHammerActive) 1.5.dp else 1.dp,
+                            color = if (isHammerActive) Color(0xFFFFD700) else if (hammerCount > 0) Color(0xFFFFB300).copy(alpha = 0.6f) else BoardBorder,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onToggleHammer() }
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .testTag("hammer_powerup_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "🔨",
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = if (isHammerActive) "ACTIVE" else "$hammerCount",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isHammerActive) Color(0xFF0F111E) else if (hammerCount > 0) Color(0xFFFFD54F) else Color.Gray
+                        )
+                    }
+                }
+
+                // Daily Missions Button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color(0xFF1E2235), Color(0xFF161928))
+                            )
+                        )
+                        .border(
+                            width = if (unclaimedMissions > 0) 1.5.dp else 1.dp,
+                            color = if (unclaimedMissions > 0) Color(0xFFFF5252) else BoardBorder,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onShowMissions() }
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .testTag("daily_missions_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "🎯",
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "GOALS",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        if (unclaimedMissions > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF1744))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = "$unclaimedMissions",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // High Score & Combo Streak

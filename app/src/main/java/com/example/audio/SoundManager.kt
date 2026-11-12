@@ -52,6 +52,7 @@ class SoundManager(private val context: Context) {
     private var soundComboId: Int = 0
     private var soundGameOverId: Int = 0
     private var soundPowerupId: Int = 0
+    private var soundHammerId: Int = 0
 
     init {
         scope.launch {
@@ -122,6 +123,16 @@ class SoundManager(private val context: Context) {
             )
             val powerFile = writeWavFile("snd_powerup.wav", powerSamples, sampleRate)
             soundPowerupId = soundPool.load(powerFile.absolutePath, 1)
+
+            // 7. Hammer Smash Sound: heavy arcade strike & crystal shatter
+            val hammerSamples = generateToneSamples(
+                frequencies = doubleArrayOf(180.0, 90.0, 600.0, 1100.0, 1600.0),
+                durationsMs = doubleArrayOf(35.0, 50.0, 30.0, 40.0, 90.0),
+                sampleRate = sampleRate,
+                decay = true
+            )
+            val hammerFile = writeWavFile("snd_hammer.wav", hammerSamples, sampleRate)
+            soundHammerId = soundPool.load(hammerFile.absolutePath, 1)
         } catch (_: Exception) {}
     }
 
@@ -177,6 +188,16 @@ class SoundManager(private val context: Context) {
         if (!isSoundEnabled) return
         if (soundPowerupId != 0) {
             soundPool.play(soundPowerupId, 1f, 1f, 3, 0, 1.0f)
+        }
+        vibrateHeavy()
+    }
+
+    fun playHammerSmash() {
+        if (!isSoundEnabled) return
+        if (soundHammerId != 0) {
+            soundPool.play(soundHammerId, 1f, 1f, 3, 0, 1.0f)
+        } else {
+            playPlace()
         }
         vibrateHeavy()
     }

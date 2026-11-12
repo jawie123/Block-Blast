@@ -179,4 +179,100 @@ class ExampleRobolectricTest {
         assertEquals(3, stateAfterClear.lineClearBursts.first { it.col == 0 }.colorId)
         assertEquals(5, stateAfterClear.lineClearBursts.first { it.col == 7 }.colorId)
     }
+
+    @Test
+    fun `test hammer power up smashes single block decrements hammer count and allows undo`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val soundManager = com.example.audio.SoundManager(context)
+        val prefs = com.example.data.GamePreferences(context)
+        prefs.hammerCount = 3
+        val viewModel = com.example.viewmodel.GameViewModel(context, soundManager, prefs)
+
+        // Inject grid with a single block at (3, 3)
+        val testGrid = List(8) { r ->
+            List(8) { c -> if (r == 3 && c == 3) 4 else 0 }
+        }
+        val stateField = viewModel.javaClass.getDeclaredField("_gameState")
+        stateField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val stateFlow = stateField.get(viewModel) as kotlinx.coroutines.flow.MutableStateFlow<com.example.model.GameState>
+        stateFlow.value = stateFlow.value.copy(
+            grid = testGrid,
+            hammerCount = 3,
+            isHammerActive = false
+        )
+
+        // Cannot smash while hammer mode is inactive
+        val inactiveSmash = viewModel.useHammerOnCell(3, 3)
+        assertFalse(inactiveSmash)
+        assertEquals(4, viewModel.gameState.value.grid[3][3])
+
+        // Activate hammer mode
+        viewModel.toggleHammerMode()
+        assertTrue(viewModel.gameState.value.isHammerActive)
+
+        // Cannot smash empty cell (0, 0)
+        val emptySmash = viewModel.useHammerOnCell(0, 0)
+        assertFalse(emptySmash)
+
+        // Smash filled cell at (3, 3)
+        val smashSuccess = viewModel.useHammerOnCell(3, 3)
+        assertTrue(smashSuccess)
+        assertEquals(0, viewModel.gameState.value.grid[3][3])
+        assertEquals(2, viewModel.gameState.value.hammerCount)
+        assertEquals(2, prefs.hammerCount)
+        assertFalse(viewModel.gameState.value.isHammerActive)
+        assertTrue(viewModel.gameState.value.canUndo)
+
+        // Undo hammer smash reverts the smashed cell and returns the hammer!
+        val undone = viewModel.undoLastMove()
+        assertTrue(undone)
+        assertEquals(4, viewModel.gameState.value.grid[3][3])
+        assertEquals(3, viewModel.gameState.value.hammerCount)
+        assertEquals(3, prefs.hammerCount)
+    }
+
+    @Test
+    fun `test daily missions generation deterministic and progress tracking and claim reward`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = com.example.data.GamePreferences(context)
+        val testDate = "2026-11-12"
+
+        val missions = com.example.model.DailyMissionGenerator.generateMissionsForDate(testDate)
+        assertEquals(3, missions.size)
+        // Deterministic: generated twice for same date gives identical mission IDs and targets
+        val missionsAgain = com.example.model.DailyMissionGenerator.generateMissionsForDate(testDate)
+        for (i in 0 until 3) {
+            assertEquals(missions[i].id, missionsAgain[i].id)
+            assertEquals(missions[i].type, missionsAgain[i].type)
+            assertEquals(missions[i].target, missionsAgain[i].target)
+            assertEquals(missions[i].hammerReward, missionsAgain[i].hammerReward)
+        }
+
+        val soundManager = com.example.audio.SoundManager(context)
+        prefs.hammerCount = 2
+        val viewModel = com.example.viewmodel.GameViewModel(context, soundManager, prefs)
+
+        val firstMission = viewModel.gameState.value.dailyMissions.first()
+        assertFalse(firstMission.isCompleted)
+        assertFalse(firstMission.isClaimed)
+
+        // Progress the mission to completion
+        viewModel.recordMissionEvent(firstMission.type, firstMission.target)
+        val stateAfterEvent = viewModel.gameState.value
+        val updatedMission = stateAfterEvent.dailyMissions.first { it.id == firstMission.id }
+        assertTrue(updatedMission.isCompleted)
+        assertFalse(updatedMission.isClaimed)
+        assertTrue(stateAfterEvent.unclaimedMissionsCount >= 1)
+
+        // Claim reward
+        val initialHammers = stateAfterEvent.hammerCount
+        val claimed = viewModel.claimMissionReward(firstMission.id)
+        assertTrue(claimed)
+
+        val stateAfterClaim = viewModel.gameState.value
+        assertEquals(initialHammers + firstMission.hammerReward, stateAfterClaim.hammerCount)
+        assertEquals(initialHammers + firstMission.hammerReward, prefs.hammerCount)
+        assertTrue(stateAfterClaim.dailyMissions.first { it.id == firstMission.id }.isClaimed)
+    }
 }

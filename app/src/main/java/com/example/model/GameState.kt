@@ -51,5 +51,9 @@ data class GameState(
     val dailyBatchIndex: Int = 0,
     val dailyTargetScore: Int = 5000,
     val dailyGlobalRecord: Int = 8540,
-    val canUndo: Boolean = false
+    val canUndo: Boolean = false,
+    val hammerCount: Int = 3,
+    val isHammerActive: Boolean = false,
+    val dailyMissions: List<DailyMission> = emptyList(),
+    val unclaimedMissionsCount: Int = 0
 )

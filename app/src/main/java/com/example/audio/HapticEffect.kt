@@ -18,6 +18,7 @@ sealed interface HapticEffect {
     object SnapPreview : HapticEffect
     object GameOver : HapticEffect
     object PowerUp : HapticEffect
+    object HammerSmash : HapticEffect
 }
 
 /**
@@ -68,6 +69,10 @@ object AppHaptics {
             }
             is HapticEffect.PowerUp -> {
                 vibrateWaveform(vibrator, longArrayOf(0, 25, 30, 45, 30, 80), intArrayOf(0, 100, 0, 180, 0, 255))
+            }
+            is HapticEffect.HammerSmash -> {
+                composeHaptic?.performHapticFeedback(HapticFeedbackType.LongPress)
+                vibrateWaveform(vibrator, longArrayOf(0, 35, 25, 65), intArrayOf(0, 220, 0, 255))
             }
         }
     }

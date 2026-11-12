@@ -34,6 +34,7 @@ fun BlockCell(
     ghostColorId: Int? = null,
     isClearing: Boolean = false,
     isProspectiveClear: Boolean = false,
+    isHammerTarget: Boolean = false,
     emptyTileTint: Color? = null,
     cornerRadius: Dp = 6.dp,
     modifier: Modifier = Modifier
@@ -49,6 +50,15 @@ fun BlockCell(
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulseAlpha"
+    )
+    val hammerPulse by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(350, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "hammerPulseAlpha"
     )
 
     when {
@@ -86,11 +96,12 @@ fun BlockCell(
         // Filled jewel block
         colorId > 0 -> {
             val palette = getBlockPalette(colorId)
-            val borderHighlight = if (isProspectiveClear) {
-                Color.White.copy(alpha = prospectivePulse)
-            } else {
-                palette.light
+            val borderHighlight = when {
+                isHammerTarget -> Color(0xFFFFB300).copy(alpha = hammerPulse)
+                isProspectiveClear -> Color.White.copy(alpha = prospectivePulse)
+                else -> palette.light
             }
+            val borderWidth = if (isHammerTarget) 2.dp else 1.dp
 
             Box(
                 modifier = modifier
@@ -112,7 +123,7 @@ fun BlockCell(
                             )
                         )
                     }
-                    .border(1.dp, borderHighlight, shape)
+                    .border(borderWidth, borderHighlight, shape)
                     .fillMaxSize()
                     .testTag("block_cell_filled")
             )

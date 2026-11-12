@@ -152,12 +152,12 @@ fun GridBoard(
                     val cellSizePx = bounds.width / 8f
                     onBoardPositioned(bounds, cellSizePx)
                 }
-                .pointerInput(gameState.selectedShapeIndex) {
+                .pointerInput(gameState.selectedShapeIndex, gameState.isHammerActive) {
                     detectTapGestures { offset ->
                         val cellSize = size.width / 8f
                         val col = (offset.x / cellSize).toInt().coerceIn(0, 7)
                         val row = (offset.y / cellSize).toInt().coerceIn(0, 7)
-                        if (gameState.selectedShapeIndex != null) {
+                        if (gameState.selectedShapeIndex != null || gameState.isHammerActive) {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
                         onCellTapped(row, col)
@@ -199,6 +199,8 @@ fun GridBoard(
                     val isProspective = gameState.prospectiveRows.contains(r) ||
                             gameState.prospectiveCols.contains(c)
 
+                    val isHammerTarget = gameState.isHammerActive && colorId > 0
+
                     Box(
                         modifier = Modifier
                             .aspectRatio(1f)
@@ -210,16 +212,17 @@ fun GridBoard(
                             ghostColorId = ghostColorId,
                             isClearing = isClearing,
                             isProspectiveClear = isProspective,
+                            isHammerTarget = isHammerTarget,
                             emptyTileTint = if (streak > 0 || isHighScoreStreak) animGlowColor else null
                         )
                     }
                 }
             }
 
-            // Line Clear Particle System (Exploding crystal shards, star sparkles, and laser streaks)
+            // Line Clear Particle System with combo visual feedback & shockwave ripples
             LineClearParticleSystem(
                 bursts = gameState.lineClearBursts,
-                cellSizePx = constraints.maxWidth / 8f
+                modifier = Modifier.fillMaxSize()
             )
 
             // Score Popups Floating Layer
