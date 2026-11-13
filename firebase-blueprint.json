@@ -1,0 +1,212 @@
+{
+  "entities": {
+    "DailyLeaderboardEntry": {
+      "title": "DailyLeaderboardEntry",
+      "description": "A player's best score entry for a specific date's procedural Daily Puzzle Challenge.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the player."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Public display name of the player for the leaderboard."
+        },
+        "date": {
+          "type": "string",
+          "description": "Challenge date in yyyy-MM-dd format."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Best score achieved on this daily puzzle challenge."
+        },
+        "linesCleared": {
+          "type": "integer",
+          "description": "Lines cleared in the best run."
+        },
+        "maxCombo": {
+          "type": "integer",
+          "description": "Highest combo streak achieved in the best run."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial submission (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest high-score update (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "date",
+        "score",
+        "linesCleared",
+        "maxCombo",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GlobalLeaderboardEntry": {
+      "title": "GlobalLeaderboardEntry",
+      "description": "A player's cumulative all-time total score and career stats for the real-time global leaderboard.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the player."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Public display name of the player for the global leaderboard."
+        },
+        "totalScore": {
+          "type": "integer",
+          "description": "Cumulative total score earned across all games of all time."
+        },
+        "bestScore": {
+          "type": "integer",
+          "description": "Highest single-game score achieved across all time."
+        },
+        "totalLinesCleared": {
+          "type": "integer",
+          "description": "Cumulative lines cleared across all time."
+        },
+        "highestCombo": {
+          "type": "integer",
+          "description": "Highest combo multiplier streak achieved across all time."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial leaderboard entry creation (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest score update (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "totalScore",
+        "bestScore",
+        "totalLinesCleared",
+        "highestCombo",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SavedGameSession": {
+      "title": "SavedGameSession",
+      "description": "Serialized in-progress game session allowing a player to resume across app exits and devices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the session owner."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": ["CLASSIC", "DAILY_CHALLENGE"],
+          "description": "Game mode for this saved session."
+        },
+        "gridFlat": {
+          "type": "array",
+          "description": "Row-major 64-element list of color IDs representing the 8x8 board."
+        },
+        "pieces": {
+          "type": "array",
+          "description": "3-element list of slot maps representing active pieces in the tray."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Current session score."
+        },
+        "comboStreak": {
+          "type": "integer",
+          "description": "Current active combo streak."
+        },
+        "maxComboSession": {
+          "type": "integer",
+          "description": "Highest combo achieved during this session."
+        },
+        "linesClearedSession": {
+          "type": "integer",
+          "description": "Total lines cleared during this session."
+        },
+        "isGameOver": {
+          "type": "boolean",
+          "description": "Whether the game session has ended."
+        },
+        "secondChanceAvailable": {
+          "type": "boolean",
+          "description": "Whether the second-chance 3x3 blast is still unused."
+        },
+        "dailyDate": {
+          "type": "string",
+          "description": "Date string (yyyy-MM-dd) if DAILY_CHALLENGE."
+        },
+        "dailyBatchIndex": {
+          "type": "integer",
+          "description": "Current procedural piece batch index for Daily Challenge."
+        },
+        "hammerCount": {
+          "type": "integer",
+          "description": "Player's hammer power-up count."
+        },
+        "clientUpdatedAt": {
+          "type": "integer",
+          "description": "Epoch milliseconds of last save for local/cloud conflict resolution."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial session creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last session update."
+        }
+      },
+      "required": [
+        "userId",
+        "gameMode",
+        "gridFlat",
+        "pieces",
+        "score",
+        "comboStreak",
+        "maxComboSession",
+        "linesClearedSession",
+        "isGameOver",
+        "secondChanceAvailable",
+        "dailyDate",
+        "dailyBatchIndex",
+        "hammerCount",
+        "clientUpdatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/daily_challenges/{dateStr}/scores/{userId}": {
+      "schema": { "$ref": "#/entities/DailyLeaderboardEntry" },
+      "description": "Global leaderboard scores for a given day's procedurally generated 8x8 puzzle challenge."
+    },
+    "/global_leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/GlobalLeaderboardEntry" },
+      "description": "All-time global leaderboard ranked by cumulative total score across all games."
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/SavedGameSession" },
+      "description": "Private user-scoped active game sessions (classic or daily) for seamless resume."
+    }
+  }
+}

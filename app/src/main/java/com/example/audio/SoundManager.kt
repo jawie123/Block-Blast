@@ -2,6 +2,7 @@ package com.example.audio
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.media.SoundPool
 import android.os.Build
 import android.os.VibrationEffect
@@ -15,17 +16,37 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
+import kotlin.math.exp
 import kotlin.math.sin
 
 /**
- * SoundManager using Android's SoundPool to deliver crisp, zero-latency
- * arcade sound effects during block placement, line clears, combos, and game-over states.
+ * SoundManager using Android's SoundPool for crisp, zero-latency arcade sound effects
+ * and MediaPlayer for a looping ambient puzzle background music track.
  */
 class SoundManager(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO)
+    private val musicLock = Any()
 
+    @Volatile
+    var isMusicEnabled: Boolean = true
+        set(value) {
+            field = value
+            updateMusicPlaybackState()
+        }
+
+    @Volatile
     var isSoundEnabled: Boolean = true
+
+    @Volatile
     var isHapticsEnabled: Boolean = true
+
+    @Volatile
+    private var isMusicForegrounded: Boolean = false
+
+    @Volatile
+    private var musicFilePath: String? = null
+
+    private var mediaPlayer: MediaPlayer? = null
 
     private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
@@ -133,7 +154,50 @@ class SoundManager(private val context: Context) {
             )
             val hammerFile = writeWavFile("snd_hammer.wav", hammerSamples, sampleRate)
             soundHammerId = soundPool.load(hammerFile.absolutePath, 1)
+
+            // 8. Ambient Looping Background Music (16s seamless chill synth pad + chimes)
+            val bgmSamples = generateAmbientMusicSamples(sampleRate = sampleRate)
+            val bgmFile = writeWavFile("bgm_ambient.wav", bgmSamples, sampleRate)
+            musicFilePath = bgmFile.absolutePath
+            updateMusicPlaybackState()
         } catch (_: Exception) {}
+    }
+
+    fun setMusicForegrounded(foregrounded: Boolean) {
+        isMusicForegrounded = foregrounded
+        updateMusicPlaybackState()
+    }
+
+    private fun updateMusicPlaybackState() {
+        synchronized(musicLock) {
+            val shouldPlay = isMusicEnabled && isMusicForegrounded
+            try {
+                if (shouldPlay) {
+                    val path = musicFilePath ?: return
+                    val player = mediaPlayer ?: MediaPlayer().apply {
+                        setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_GAME)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                .build()
+                        )
+                        setDataSource(path)
+                        isLooping = true
+                        setVolume(0.18f, 0.18f)
+                        prepare()
+                    }.also { mediaPlayer = it }
+
+                    if (!player.isPlaying) {
+                        player.start()
+                    }
+                } else {
+                    val player = mediaPlayer
+                    if (player != null && player.isPlaying) {
+                        player.pause()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     fun playClick() {
@@ -273,6 +337,62 @@ class SoundManager(private val context: Context) {
         return buffer
     }
 
+    /**
+     * Synthesizes a 16-second seamless ambient chill puzzle loop using soft
+     * sine pads and gentle pentatonic marimba bells (Cmaj9 -> Am9 -> Fmaj7 -> G6).
+     */
+    private fun generateAmbientMusicSamples(sampleRate: Int): ShortArray {
+        val barDurationSec = 4.0
+        val barCount = 4
+        val totalDurationSec = barDurationSec * barCount
+        val totalSamples = (sampleRate * totalDurationSec).toInt()
+        val samplesPerBar = (sampleRate * barDurationSec).toInt()
+        val buffer = ShortArray(totalSamples)
+
+        val chords = arrayOf(
+            doubleArrayOf(261.63, 329.63, 392.00, 587.33), // Cmaj9
+            doubleArrayOf(220.00, 261.63, 329.63, 493.88), // Am9
+            doubleArrayOf(174.61, 220.00, 261.63, 329.63), // Fmaj7
+            doubleArrayOf(196.00, 246.94, 293.66, 329.63)  // G6
+        )
+        val arpeggioNotes = arrayOf(
+            doubleArrayOf(523.25, 659.25, 783.99, 659.25, 587.33, 659.25, 783.99, 1046.50),
+            doubleArrayOf(440.00, 523.25, 659.25, 523.25, 493.88, 523.25, 659.25, 880.00),
+            doubleArrayOf(349.23, 440.00, 523.25, 440.00, 523.25, 659.25, 523.25, 698.46),
+            doubleArrayOf(392.00, 493.88, 587.33, 493.88, 587.33, 659.25, 783.99, 587.33)
+        )
+
+        val stepSamples = samplesPerBar / 8
+        for (i in 0 until totalSamples) {
+            val barIdx = (i / samplesPerBar).coerceIn(0, barCount - 1)
+            val barOffset = i - (barIdx * samplesPerBar)
+            val barProgress = barOffset.toDouble() / samplesPerBar
+            val t = i.toDouble() / sampleRate
+
+            // Smooth bell-shaped envelope per bar avoids any loop-seam click
+            val padEnvelope = sin(PI * barProgress).coerceIn(0.0, 1.0)
+            val chord = chords[barIdx]
+            var padSum = 0.0
+            for (freq in chord) {
+                padSum += sin(2.0 * PI * freq * t)
+            }
+            val padSample = (padSum / chord.size) * padEnvelope * 0.45
+
+            // Gentle plucked chime on each 8th beat inside the bar
+            val stepIdx = (barOffset / stepSamples).coerceIn(0, 7)
+            val stepOffset = barOffset - (stepIdx * stepSamples)
+            val stepT = stepOffset.toDouble() / sampleRate
+            val arpFreq = arpeggioNotes[barIdx][stepIdx]
+            val attack = (stepOffset / (sampleRate * 0.015)).coerceIn(0.0, 1.0)
+            val decay = exp(-stepT * 4.5)
+            val arpSample = sin(2.0 * PI * arpFreq * stepT) * attack * decay * 0.25
+
+            val mixed = (padSample + arpSample) * Short.MAX_VALUE * 0.55
+            buffer[i] = mixed.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+        return buffer
+    }
+
     private fun vibrate(durationMs: Long) {
         if (!isHapticsEnabled) return
         try {
@@ -300,6 +420,15 @@ class SoundManager(private val context: Context) {
     }
 
     fun release() {
+        synchronized(musicLock) {
+            try {
+                mediaPlayer?.stop()
+            } catch (_: Exception) {}
+            try {
+                mediaPlayer?.release()
+            } catch (_: Exception) {}
+            mediaPlayer = null
+        }
         try {
             soundPool.release()
         } catch (_: Exception) {}

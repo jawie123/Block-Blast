@@ -275,4 +275,311 @@ class ExampleRobolectricTest {
         assertEquals(initialHammers + firstMission.hammerReward, prefs.hammerCount)
         assertTrue(stateAfterClaim.dailyMissions.first { it.id == firstMission.id }.isClaimed)
     }
+
+    @Test
+    fun `test daily puzzle generator produces deterministic valid 8x8 obstacle layout`() {
+        val seed = 20261113L
+        val boardA = com.example.model.DailyPuzzleGenerator.generateInitialBoard(seed)
+        val boardB = com.example.model.DailyPuzzleGenerator.generateInitialBoard(seed)
+
+        assertEquals(8, boardA.size)
+        assertTrue(boardA.all { it.size == 8 })
+        assertEquals(boardA, boardB)
+
+        // Ensure board contains pre-populated puzzle obstacles and >= 2 open cells per row/col
+        val filledCount = boardA.sumOf { row -> row.count { it != 0 } }
+        assertTrue("Expected procedural puzzle obstacles", filledCount > 0)
+        for (r in 0 until 8) {
+            assertTrue("Row $r must have >= 2 open cells", boardA[r].count { it == 0 } >= 2)
+        }
+        for (c in 0 until 8) {
+            val colEmpty = (0 until 8).count { r -> boardA[r][c] == 0 }
+            assertTrue("Col $c must have >= 2 open cells", colEmpty >= 2)
+        }
+
+        // Opening daily batch pieces must fit on the generated puzzle board
+        val openingBatch = ShapeDefinitions.getDailyShapeBatch(seed, 0)
+        val viewModel = com.example.viewmodel.GameViewModel(
+            ApplicationProvider.getApplicationContext(),
+            com.example.audio.SoundManager(ApplicationProvider.getApplicationContext()),
+            com.example.data.GamePreferences(ApplicationProvider.getApplicationContext())
+        )
+        assertTrue(openingBatch.all { shape -> viewModel.canFitAnywhere(boardA, shape) })
+    }
+
+    @Test
+    fun `test session state saves to local file and resumes on new ViewModel instance`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val soundManager = com.example.audio.SoundManager(context)
+        val prefs = com.example.data.GamePreferences(context)
+        val storage = com.example.data.LocalSessionStorage(context)
+
+        val vm1 = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = storage
+        )
+
+        // Inject a deterministic state and make a move
+        val singleDot = BlockShape(
+            id = "dot_1x1",
+            name = "dot_1x1",
+            matrix = listOf(listOf(true)),
+            colorId = 3
+        )
+        val stateField = vm1.javaClass.getDeclaredField("_gameState")
+        stateField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val stateFlow = stateField.get(vm1) as kotlinx.coroutines.flow.MutableStateFlow<com.example.model.GameState>
+        stateFlow.value = stateFlow.value.copy(
+            grid = List(8) { List(8) { 0 } },
+            activePieces = listOf(singleDot, singleDot.copy(instanceId = "dot2"), null),
+            score = 320
+        )
+
+        val placed = vm1.placeShape(0, 4, 4)
+        assertTrue(placed)
+        val expectedScore = vm1.gameState.value.score
+        assertTrue(expectedScore > 320)
+
+        // Simulate app restart by creating a new ViewModel backed by the same LocalSessionStorage
+        val vm2 = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = storage
+        )
+        val resumedState = vm2.gameState.value
+        assertEquals(expectedScore, resumedState.score)
+        assertEquals(3, resumedState.grid[4][4])
+        assertEquals(null, resumedState.activePieces[0])
+        assertTrue(resumedState.activePieces[1] != null)
+    }
+
+    @Test
+    fun `test totalAllTimeScore accumulates across moves and persists across new games`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val soundManager = com.example.audio.SoundManager(context)
+        val prefs = com.example.data.GamePreferences(context)
+        prefs.totalAllTimeScore = 0L
+
+        val viewModel = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = null
+        )
+
+        val singleDot = BlockShape(
+            id = "dot_1x1",
+            name = "dot_1x1",
+            matrix = listOf(listOf(true)),
+            colorId = 2
+        )
+        val stateField = viewModel.javaClass.getDeclaredField("_gameState")
+        stateField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val stateFlow = stateField.get(viewModel) as kotlinx.coroutines.flow.MutableStateFlow<com.example.model.GameState>
+        stateFlow.value = stateFlow.value.copy(
+            grid = List(8) { List(8) { 0 } },
+            activePieces = listOf(singleDot, singleDot.copy(instanceId = "dot2"), null),
+            score = 0
+        )
+
+        assertTrue(viewModel.placeShape(0, 0, 0))
+        val afterFirstMoveTotal = viewModel.gameState.value.totalAllTimeScore
+        assertEquals(10L, afterFirstMoveTotal)
+        assertEquals(10L, prefs.totalAllTimeScore)
+
+        // Starting a brand new game resets current session score to 0 but keeps totalAllTimeScore!
+        viewModel.startNewGame()
+        assertEquals(0, viewModel.gameState.value.score)
+        assertEquals(10L, viewModel.gameState.value.totalAllTimeScore)
+
+        // Making another move in the new game adds to the cumulative total
+        stateFlow.value = stateFlow.value.copy(
+            grid = List(8) { List(8) { 0 } },
+            activePieces = listOf(singleDot, null, null)
+        )
+        assertTrue(viewModel.placeShape(0, 1, 1))
+        assertEquals(20L, viewModel.gameState.value.totalAllTimeScore)
+        assertEquals(20L, prefs.totalAllTimeScore)
+    }
+
+    @Test
+    fun `test progressive difficulty tier updates in GameViewModel on score threshold and undo`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val soundManager = com.example.audio.SoundManager(context)
+        val prefs = com.example.data.GamePreferences(context)
+        val viewModel = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = null
+        )
+
+        assertEquals(1, viewModel.gameState.value.difficultyLevel)
+        assertEquals("STARTER", viewModel.gameState.value.difficultyTitle)
+
+        // Inject score = 495 right below Challenger (500), with a 1-cell dot (+10 pts -> 505)
+        val singleDot = BlockShape(
+            id = "dot_1x1",
+            name = "dot_1x1",
+            matrix = listOf(listOf(true)),
+            colorId = 3
+        )
+        val stateField = viewModel.javaClass.getDeclaredField("_gameState")
+        stateField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val stateFlow = stateField.get(viewModel) as kotlinx.coroutines.flow.MutableStateFlow<com.example.model.GameState>
+        stateFlow.value = stateFlow.value.copy(
+            grid = List(8) { List(8) { 0 } },
+            activePieces = listOf(singleDot, null, null),
+            score = 495,
+            difficultyLevel = 1,
+            difficultyTitle = "STARTER"
+        )
+
+        assertTrue(viewModel.placeShape(0, 2, 2))
+        val afterLevelUp = viewModel.gameState.value
+        assertEquals(505, afterLevelUp.score)
+        assertEquals(2, afterLevelUp.difficultyLevel)
+        assertEquals("CHALLENGER", afterLevelUp.difficultyTitle)
+        assertTrue(afterLevelUp.comboBannerText?.contains("CHALLENGER") == true)
+
+        // Undo reverts back to Tier 1 STARTER
+        assertTrue(viewModel.undoLastMove())
+        val afterUndo = viewModel.gameState.value
+        assertEquals(495, afterUndo.score)
+        assertEquals(1, afterUndo.difficultyLevel)
+        assertEquals("STARTER", afterUndo.difficultyTitle)
+    }
+
+    @Test
+    fun `test time attack mode starts at 60s rewards bonus seconds and triggers TIME_UP with second chance`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val soundManager = com.example.audio.SoundManager(context)
+        val prefs = com.example.data.GamePreferences(context)
+        prefs.timeAttackHighScore = 0
+        val storage = com.example.data.LocalSessionStorage(context)
+
+        val viewModel = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = storage
+        )
+
+        viewModel.switchGameMode(com.example.model.GameMode.TIME_ATTACK)
+        val started = viewModel.gameState.value
+        assertEquals(com.example.model.GameMode.TIME_ATTACK, started.gameMode)
+        assertEquals(60_000L, started.timeRemainingMs)
+        assertEquals(com.example.model.GameOverReason.NO_MOVES, started.gameOverReason)
+        assertFalse(started.isGameOver)
+
+        // Advance clock by 20s -> 40s remaining
+        viewModel.tickTimeAttack(20_000L)
+        assertEquals(40_000L, viewModel.gameState.value.timeRemainingMs)
+
+        // Setup row 0 with 7 cells filled so placing a 1x1 dot at (0, 7) clears 1 line -> +4s bonus!
+        val partialGrid = List(8) { r ->
+            List(8) { c -> if (r == 0 && c < 7) 2 else 0 }
+        }
+        val singleDot = BlockShape(
+            id = "dot_1x1",
+            name = "dot_1x1",
+            matrix = listOf(listOf(true)),
+            colorId = 4
+        )
+        val stateField = viewModel.javaClass.getDeclaredField("_gameState")
+        stateField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val stateFlow = stateField.get(viewModel) as kotlinx.coroutines.flow.MutableStateFlow<com.example.model.GameState>
+        stateFlow.value = stateFlow.value.copy(
+            grid = partialGrid,
+            activePieces = listOf(singleDot, singleDot.copy(instanceId = "dot2"), null),
+            comboStreak = 0
+        )
+
+        assertTrue(viewModel.placeShape(0, 0, 7))
+        val afterClear = viewModel.gameState.value
+        assertEquals(44_000L, afterClear.timeRemainingMs)
+        assertEquals(4, afterClear.lastTimeBonusSeconds)
+        assertTrue(afterClear.score > 0)
+        assertEquals(afterClear.score, prefs.timeAttackHighScore)
+
+        // Resume persisted Time Attack session in a fresh ViewModel
+        val resumedVm = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = storage
+        )
+        assertEquals(com.example.model.GameMode.TIME_ATTACK, resumedVm.gameState.value.gameMode)
+        assertEquals(44_000L, resumedVm.gameState.value.timeRemainingMs)
+
+        // Tick down remaining 44s -> TIME_UP Game Over
+        resumedVm.tickTimeAttack(44_000L)
+        val expiredState = resumedVm.gameState.value
+        assertEquals(0L, expiredState.timeRemainingMs)
+        assertTrue(expiredState.isGameOver)
+        assertEquals(com.example.model.GameOverReason.TIME_UP, expiredState.gameOverReason)
+
+        // Second Chance revives with +15s!
+        resumedVm.useSecondChance()
+        val revivedState = resumedVm.gameState.value
+        assertFalse(revivedState.isGameOver)
+        assertFalse(revivedState.secondChanceAvailable)
+        assertEquals(15_000L, revivedState.timeRemainingMs)
+        assertEquals(com.example.model.GameOverReason.NO_MOVES, revivedState.gameOverReason)
+    }
+
+    @Test
+    fun `test settings toggles persist music sound effects and haptics state`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val soundManager = com.example.audio.SoundManager(context)
+        val prefs = com.example.data.GamePreferences(context)
+        prefs.isMusicEnabled = true
+        prefs.isSoundEnabled = true
+        prefs.isHapticsEnabled = true
+
+        val viewModel = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = null
+        )
+
+        assertTrue(viewModel.gameState.value.isMusicEnabled)
+        assertTrue(viewModel.gameState.value.isSoundEnabled)
+        assertTrue(viewModel.gameState.value.isHapticsEnabled)
+
+        assertFalse(viewModel.toggleMusic())
+        assertFalse(viewModel.gameState.value.isMusicEnabled)
+        assertFalse(soundManager.isMusicEnabled)
+        assertFalse(prefs.isMusicEnabled)
+
+        assertFalse(viewModel.toggleSound())
+        assertFalse(viewModel.gameState.value.isSoundEnabled)
+        assertFalse(soundManager.isSoundEnabled)
+        assertFalse(prefs.isSoundEnabled)
+
+        assertFalse(viewModel.toggleHaptics())
+        assertFalse(viewModel.gameState.value.isHapticsEnabled)
+        assertFalse(soundManager.isHapticsEnabled)
+        assertFalse(prefs.isHapticsEnabled)
+
+        // Fresh ViewModel inherits persisted settings
+        val freshSoundManager = com.example.audio.SoundManager(context)
+        val freshViewModel = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = freshSoundManager,
+            preferences = prefs,
+            localSessionStorage = null
+        )
+        assertFalse(freshViewModel.gameState.value.isMusicEnabled)
+        assertFalse(freshViewModel.gameState.value.isSoundEnabled)
+        assertFalse(freshViewModel.gameState.value.isHapticsEnabled)
+    }
 }

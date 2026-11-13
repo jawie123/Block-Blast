@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Hardened Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidDateId(dateStr) {
+      return dateStr is string && dateStr.size() == 10 && dateStr.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Validation Helper: Daily Challenge Leaderboard Entry
+    function isValidLeaderboardEntry(data, dateStr, scoreUserId) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId == scoreUserId && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             data.date is string && data.date == dateStr &&
+             data.score is int && data.score >= 0 && data.score <= 10000000 &&
+             data.linesCleared is int && data.linesCleared >= 0 && data.linesCleared <= 100000 &&
+             data.maxCombo is int && data.maxCombo >= 0 && data.maxCombo <= 10000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // Validation Helper: All-Time Global Leaderboard Entry
+    function isValidGlobalLeaderboardEntry(data, entryUserId) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId == entryUserId && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             data.totalScore is int && data.totalScore >= 0 && data.totalScore <= 1000000000 &&
+             data.bestScore is int && data.bestScore >= 0 && data.bestScore <= 10000000 &&
+             data.totalLinesCleared is int && data.totalLinesCleared >= 0 && data.totalLinesCleared <= 10000000 &&
+             data.highestCombo is int && data.highestCombo >= 0 && data.highestCombo <= 10000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // Validation Helper: User Saved Game Session
+    function isValidSavedSession(data, userId) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId == userId && data.userId.size() <= 128 &&
+             data.gameMode is string && data.gameMode in ['CLASSIC', 'DAILY_CHALLENGE'] &&
+             data.gridFlat is list && data.gridFlat.size() == 64 && data.gridFlat[0] is int &&
+             data.pieces is list && data.pieces.size() == 3 && data.pieces[0] is map &&
+             data.score is int && data.score >= 0 && data.score <= 10000000 &&
+             data.comboStreak is int && data.comboStreak >= 0 && data.comboStreak <= 10000 &&
+             data.maxComboSession is int && data.maxComboSession >= 0 && data.maxComboSession <= 10000 &&
+             data.linesClearedSession is int && data.linesClearedSession >= 0 && data.linesClearedSession <= 100000 &&
+             data.isGameOver is bool &&
+             data.secondChanceAvailable is bool &&
+             data.dailyDate is string && data.dailyDate.size() <= 16 &&
+             data.dailyBatchIndex is int && data.dailyBatchIndex >= 0 && data.dailyBatchIndex <= 100000 &&
+             data.hammerCount is int && data.hammerCount >= 0 && data.hammerCount <= 10000 &&
+             data.clientUpdatedAt is int && data.clientUpdatedAt >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 1. Global Daily Challenge Leaderboard
+    match /daily_challenges/{dateStr}/scores/{scoreUserId} {
+      allow get: if isSignedIn() && isValidDateId(dateStr) && isValidId(scoreUserId);
+
+      // Client queries MUST align with whereGreaterThanOrEqualTo("score", 0)
+      allow list: if isSignedIn() && isValidDateId(dateStr) && resource.data.score >= 0;
+
+      allow create: if isSignedIn() &&
+                       isValidDateId(dateStr) &&
+                       isValidId(scoreUserId) &&
+                       request.auth.uid == scoreUserId &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'date', 'score', 'linesCleared', 'maxCombo', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'date', 'score', 'linesCleared', 'maxCombo', 'createdAt', 'updatedAt']) &&
+                       isValidLeaderboardEntry(incoming(), dateStr, scoreUserId);
+
+      allow update: if isSignedIn() &&
+                       isValidLeaderboardEntry(incoming(), dateStr, scoreUserId) &&
+                       isValidDateId(dateStr) &&
+                       isValidId(scoreUserId) &&
+                       request.auth.uid == scoreUserId &&
+                       incoming().userId == existing().userId &&
+                       incoming().date == existing().date &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().score >= existing().score &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'score', 'linesCleared', 'maxCombo', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidDateId(dateStr) && isValidId(scoreUserId) && request.auth.uid == scoreUserId;
+    }
+
+    // 2. All-Time Global Leaderboard (Ranked by Total Score)
+    match /global_leaderboard/{entryUserId} {
+      allow get: if isSignedIn() && isValidId(entryUserId);
+
+      // Client queries MUST align with whereGreaterThanOrEqualTo("totalScore", 0)
+      allow list: if isSignedIn() && resource.data.totalScore >= 0;
+
+      allow create: if isSignedIn() &&
+                       isValidId(entryUserId) &&
+                       request.auth.uid == entryUserId &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'totalScore', 'bestScore', 'totalLinesCleared', 'highestCombo', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'totalScore', 'bestScore', 'totalLinesCleared', 'highestCombo', 'createdAt', 'updatedAt']) &&
+                       isValidGlobalLeaderboardEntry(incoming(), entryUserId);
+
+      allow update: if isSignedIn() &&
+                       isValidGlobalLeaderboardEntry(incoming(), entryUserId) &&
+                       isValidId(entryUserId) &&
+                       request.auth.uid == entryUserId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().totalScore >= existing().totalScore &&
+                       incoming().bestScore >= existing().bestScore &&
+                       incoming().totalLinesCleared >= existing().totalLinesCleared &&
+                       incoming().highestCombo >= existing().highestCombo &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'totalScore', 'bestScore', 'totalLinesCleared', 'highestCombo', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(entryUserId) && request.auth.uid == entryUserId;
+    }
+
+    // 3. Private User Saved Sessions (for Game Resume)
+    match /users/{userId}/sessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && request.auth.uid == userId;
+
+      allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(sessionId) &&
+                       sessionId in ['classic', 'daily'] &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(['userId', 'gameMode', 'gridFlat', 'pieces', 'score', 'comboStreak', 'maxComboSession', 'linesClearedSession', 'isGameOver', 'secondChanceAvailable', 'dailyDate', 'dailyBatchIndex', 'hammerCount', 'clientUpdatedAt', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'gameMode', 'gridFlat', 'pieces', 'score', 'comboStreak', 'maxComboSession', 'linesClearedSession', 'isGameOver', 'secondChanceAvailable', 'dailyDate', 'dailyBatchIndex', 'hammerCount', 'clientUpdatedAt', 'createdAt', 'updatedAt']) &&
+                       isValidSavedSession(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       isValidSavedSession(incoming(), userId) &&
+                       isValidId(userId) &&
+                       isValidId(sessionId) &&
+                       sessionId in ['classic', 'daily'] &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['gameMode', 'gridFlat', 'pieces', 'score', 'comboStreak', 'maxComboSession', 'linesClearedSession', 'isGameOver', 'secondChanceAvailable', 'dailyDate', 'dailyBatchIndex', 'hammerCount', 'clientUpdatedAt', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && request.auth.uid == userId;
+    }
+  }
+}

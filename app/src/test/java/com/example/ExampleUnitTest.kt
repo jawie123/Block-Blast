@@ -85,6 +85,62 @@ class ExampleUnitTest {
         assertFalse(isNotGameOver)
     }
 
+    @Test
+    fun testProgressiveDifficultyTiersAndThresholds() {
+        assertEquals(com.example.model.DifficultyTier.STARTER, com.example.model.DifficultyTier.fromScore(0))
+        assertEquals(com.example.model.DifficultyTier.STARTER, com.example.model.DifficultyTier.fromScore(499))
+        assertEquals(com.example.model.DifficultyTier.CHALLENGER, com.example.model.DifficultyTier.fromScore(500))
+        assertEquals(com.example.model.DifficultyTier.CHALLENGER, com.example.model.DifficultyTier.fromScore(1499))
+        assertEquals(com.example.model.DifficultyTier.TACTICIAN, com.example.model.DifficultyTier.fromScore(1500))
+        assertEquals(com.example.model.DifficultyTier.TACTICIAN, com.example.model.DifficultyTier.fromScore(2999))
+        assertEquals(com.example.model.DifficultyTier.MASTER, com.example.model.DifficultyTier.fromScore(3000))
+        assertEquals(com.example.model.DifficultyTier.MASTER, com.example.model.DifficultyTier.fromScore(5999))
+        assertEquals(com.example.model.DifficultyTier.GRANDMASTER, com.example.model.DifficultyTier.fromScore(6000))
+        assertEquals(com.example.model.DifficultyTier.GRANDMASTER, com.example.model.DifficultyTier.fromScore(15000))
+    }
+
+    @Test
+    fun testProgressiveDifficultyIncreasesShapeComplexityWithScore() {
+        val sampleCount = 300
+        val starterShapes = (0 until sampleCount).flatMap { i ->
+            ShapeDefinitions.getShapeBatch(kotlin.random.Random(1000L + i), currentScore = 0)
+        }
+        val tacticianShapes = (0 until sampleCount).flatMap { i ->
+            ShapeDefinitions.getShapeBatch(kotlin.random.Random(2000L + i), currentScore = 2000)
+        }
+        val grandmasterShapes = (0 until sampleCount).flatMap { i ->
+            ShapeDefinitions.getShapeBatch(kotlin.random.Random(3000L + i), currentScore = 7000)
+        }
+
+        // Starter should never spawn high-tier expert or advanced irregular blocks
+        val forbiddenAtStarter = setOf("square_3x3", "plus", "z_shape", "s_shape", "line_5_h", "line_5_v", "rect_2x3", "diag_3_a")
+        assertTrue(starterShapes.none { it.id in forbiddenAtStarter })
+
+        // Grandmaster unlocks expert shapes
+        val expertIds = setOf("square_3x3", "u_up", "u_down", "stair_3_a", "stair_3_b", "rect_2x3", "rect_3x2", "diag_3_a", "diag_3_b")
+        assertTrue(grandmasterShapes.any { it.id in expertIds })
+
+        val starterAvgComplexity = starterShapes.map { it.complexity }.average()
+        val tacticianAvgComplexity = tacticianShapes.map { it.complexity }.average()
+        val grandmasterAvgComplexity = grandmasterShapes.map { it.complexity }.average()
+
+        assertTrue(
+            "Expected Tactician complexity ($tacticianAvgComplexity) > Starter ($starterAvgComplexity)",
+            tacticianAvgComplexity > starterAvgComplexity
+        )
+        assertTrue(
+            "Expected Grandmaster complexity ($grandmasterAvgComplexity) > Tactician ($tacticianAvgComplexity)",
+            grandmasterAvgComplexity > tacticianAvgComplexity
+        )
+
+        val starterAvgCells = starterShapes.map { it.cellCount }.average()
+        val grandmasterAvgCells = grandmasterShapes.map { it.cellCount }.average()
+        assertTrue(
+            "Expected Grandmaster cellCount ($grandmasterAvgCells) > Starter ($starterAvgCells)",
+            grandmasterAvgCells > starterAvgCells
+        )
+    }
+
     private fun canPlaceTest(
         grid: List<List<Int>>,
         shape: BlockShape,

@@ -1,25 +1,35 @@
 package com.example.viewmodel
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.audio.HapticEffect
 import com.example.audio.SoundManager
+import com.example.data.GameFirestoreRepository
 import com.example.data.GamePreferences
+import com.example.data.LocalSessionStorage
 import com.example.model.BlockShape
 import com.example.model.DailyMission
 import com.example.model.DailyMissionGenerator
+import com.example.model.DailyPuzzleGenerator
+import com.example.model.DifficultyTier
 import com.example.model.GameMode
+import com.example.model.GameOverReason
 import com.example.model.GameState
 import com.example.model.LineClearBurst
 import com.example.model.MissionType
+import com.example.model.SavedGameSessionData
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
+import com.google.firebase.firestore.FirebaseFirestoreException
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +38,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -35,15 +46,30 @@ import kotlinx.coroutines.launch
 
 /**
  * GameViewModel manages the 8x8 grid state (2D matrix/array), score tracking,
- * active piece pool, placement validation (canPlaceShape), and game over detection (checkGameOver).
+ * active piece pool, placement validation (canPlaceShape), game over detection,
+ * procedural Daily Puzzle Challenge boards, Firestore Daily Leaderboard sync,
+ * and automatic local + cloud session persistence & resume.
  */
 class GameViewModel(
     private val context: Context,
     val soundManager: SoundManager,
-    private val preferences: GamePreferences
+    private val preferences: GamePreferences,
+    private val localSessionStorage: LocalSessionStorage? = LocalSessionStorage(context),
+    private val firestoreRepository: GameFirestoreRepository? = null,
+    private val currentUserId: String = "",
+    private val currentUserDisplayName: String = "Player"
 ) : ViewModel() {
 
-    private val _gameState = MutableStateFlow(GameState())
+    private val _gameState = MutableStateFlow(
+        GameState(
+            totalAllTimeScore = preferences.totalAllTimeScore,
+            isMusicEnabled = preferences.isMusicEnabled,
+            isSoundEnabled = preferences.isSoundEnabled,
+            isHapticsEnabled = preferences.isHapticsEnabled,
+            currentUserId = currentUserId,
+            currentUserDisplayName = currentUserDisplayName
+        )
+    )
     val gameState: StateFlow<GameState> = _gameState.asStateFlow()
 
     // Observable individual score flows
@@ -60,6 +86,85 @@ class GameViewModel(
     // Tutorial overlay state (shown automatically on first launch)
     private val _showTutorial = MutableStateFlow(!preferences.hasSeenTutorial)
     val showTutorial: StateFlow<Boolean> = _showTutorial.asStateFlow()
+
+    private var hasUserInteractedThisSession = false
+    private var lastAppliedSessionTimestamp = 0L
+    private var leaderboardJob: Job? = null
+    private var globalLeaderboardJob: Job? = null
+    private var timeAttackJob: Job? = null
+    private val _isTimeAttackPaused = MutableStateFlow(false)
+
+    fun setTimeAttackPaused(paused: Boolean) {
+        _isTimeAttackPaused.value = paused
+    }
+
+    private fun stopTimeAttackTimer() {
+        timeAttackJob?.cancel()
+        timeAttackJob = null
+    }
+
+    private fun ensureTimeAttackTimer() {
+        val state = _gameState.value
+        if (state.gameMode == GameMode.TIME_ATTACK && !state.isGameOver && state.timeRemainingMs > 0L) {
+            if (timeAttackJob?.isActive == true) return
+            timeAttackJob = viewModelScope.launch {
+                while (true) {
+                    delay(100L)
+                    val cur = _gameState.value
+                    if (cur.gameMode != GameMode.TIME_ATTACK || cur.isGameOver) {
+                        break
+                    }
+                    if (!_isTimeAttackPaused.value) {
+                        tickTimeAttack(100L)
+                    }
+                }
+            }
+        } else {
+            stopTimeAttackTimer()
+        }
+    }
+
+    /**
+     * Advances the Time Attack countdown clock by [elapsedMs].
+     * Ends the game with [GameOverReason.TIME_UP] when remaining time reaches zero.
+     */
+    fun tickTimeAttack(elapsedMs: Long) {
+        if (elapsedMs <= 0L) return
+        val current = _gameState.value
+        if (current.gameMode != GameMode.TIME_ATTACK || current.isGameOver) return
+
+        val nextRemaining = (current.timeRemainingMs - elapsedMs).coerceAtLeast(0L)
+        if (nextRemaining == 0L) {
+            stopTimeAttackTimer()
+            val isNewRecord = current.score > preferences.timeAttackHighScore
+            if (isNewRecord) {
+                preferences.timeAttackHighScore = current.score
+            }
+            val bestScore = maxOf(current.highScore, preferences.timeAttackHighScore)
+
+            _gameState.update {
+                it.copy(
+                    timeRemainingMs = 0L,
+                    isGameOver = true,
+                    gameOverReason = GameOverReason.TIME_UP,
+                    highScore = bestScore,
+                    isNewHighScore = it.isNewHighScore || isNewRecord,
+                    isHammerActive = false,
+                    selectedShapeIndex = null,
+                    hoverRow = null,
+                    hoverCol = null,
+                    hoverPreviewCells = emptySet(),
+                    prospectiveRows = emptySet(),
+                    prospectiveCols = emptySet()
+                )
+            }
+            soundManager.playGameOver()
+            triggerHaptic(HapticEffect.GameOver)
+            flushSession(syncToCloud = false)
+        } else {
+            _gameState.update { it.copy(timeRemainingMs = nextRemaining) }
+        }
+    }
 
     fun dismissTutorial() {
         preferences.hasSeenTutorial = true
@@ -80,9 +185,282 @@ class GameViewModel(
     }
 
     init {
+        soundManager.isMusicEnabled = preferences.isMusicEnabled
         soundManager.isSoundEnabled = preferences.isSoundEnabled
         soundManager.isHapticsEnabled = preferences.isHapticsEnabled
-        startNewGame()
+        restoreSavedSessionOrStartNew()
+        if (firestoreRepository != null && currentUserId.isNotBlank()) {
+            observeDailyLeaderboard()
+            observeGlobalLeaderboard()
+        }
+    }
+
+    /**
+     * Restores the most recent unfinished local session on launch, and checks Firestore
+     * asynchronously for a newer cloud-synced session (e.g. after reinstall or device switch).
+     */
+    private fun restoreSavedSessionOrStartNew() {
+        val localSession = localSessionStorage?.loadLatestSession()
+        if (isSessionResumable(localSession)) {
+            applySavedSession(localSession!!, showResumedBanner = true)
+        } else {
+            startNewGame(mode = GameMode.CLASSIC, persistFreshState = false)
+        }
+
+        if (firestoreRepository != null && currentUserId.isNotBlank()) {
+            viewModelScope.launch {
+                val result = firestoreRepository.loadAllSessions()
+                val sessions = result.getOrNull() ?: return@launch
+                val today = getTodayDateString()
+                val newestCloud = sessions
+                    .filter { isSessionResumable(it, today) }
+                    .maxByOrNull { it.clientUpdatedAt }
+                    ?: return@launch
+
+                if (!hasUserInteractedThisSession && newestCloud.clientUpdatedAt > lastAppliedSessionTimestamp) {
+                    applySavedSession(newestCloud, showResumedBanner = true)
+                    localSessionStorage?.saveSession(newestCloud)
+                }
+            }
+        }
+    }
+
+    private fun isSessionResumable(
+        session: SavedGameSessionData?,
+        todayDate: String = getTodayDateString()
+    ): Boolean {
+        if (session == null) return false
+        if (session.isGameOver) return false
+        if (session.activePieces.none { it != null }) return false
+        if (session.gameMode == GameMode.DAILY_CHALLENGE && session.dailyDate != todayDate) {
+            return false
+        }
+        if (session.gameMode == GameMode.TIME_ATTACK && session.timeRemainingMs <= 0L) {
+            return false
+        }
+        return true
+    }
+
+    private fun applySavedSession(session: SavedGameSessionData, showResumedBanner: Boolean) {
+        lastUndoSnapshot = null
+        lastAppliedSessionTimestamp = session.clientUpdatedAt
+        val isDaily = session.gameMode == GameMode.DAILY_CHALLENGE
+        val isTimeAttack = session.gameMode == GameMode.TIME_ATTACK
+        val dateStr = session.dailyDate.ifEmpty { getTodayDateString() }
+        val dateFormatted = getTodayFormattedString()
+        val seed = computeDailySeed()
+        val puzzleTitle = if (isDaily) DailyPuzzleGenerator.getPuzzleTitle(seed) else ""
+
+        val savedHigh = when {
+            isDaily -> maxOf(preferences.getDailyHighScore(dateStr), session.score)
+            isTimeAttack -> maxOf(preferences.timeAttackHighScore, session.score)
+            else -> maxOf(preferences.highScore, session.score)
+        }
+
+        val targetScore = 4500 + ((seed % 1000).toInt())
+        val baseGlobalRecord = 8400 + ((seed % 1600).toInt())
+        val currentState = _gameState.value
+        val liveTopRecord = currentState.leaderboardEntries.firstOrNull()?.score?.toInt() ?: 0
+
+        val dailyMissions = loadDailyMissions(getTodayDateString())
+        val unclaimedCount = dailyMissions.count { it.isCompleted && !it.isClaimed }
+        preferences.hammerCount = session.hammerCount
+
+        val banner = when {
+            showResumedBanner -> "SESSION RESUMED"
+            isDaily -> "DAILY PUZZLE: $puzzleTitle"
+            isTimeAttack -> "TIME ATTACK! 60s GO!"
+            else -> null
+        }
+
+        val resumedTier = DifficultyTier.fromScore(session.score)
+        val resumedProgress = DifficultyTier.progressToNextTier(session.score)
+        val resumedTimeMs = if (isTimeAttack) {
+            session.timeRemainingMs.coerceIn(1_000L, TIME_ATTACK_MAX_MS)
+        } else {
+            TIME_ATTACK_INITIAL_MS
+        }
+
+        _gameState.value = GameState(
+            grid = session.grid,
+            activePieces = session.activePieces,
+            score = session.score,
+            highScore = savedHigh,
+            comboStreak = session.comboStreak,
+            maxComboSession = session.maxComboSession,
+            linesClearedSession = session.linesClearedSession,
+            isGameOver = session.isGameOver,
+            isNewHighScore = false,
+            secondChanceAvailable = session.secondChanceAvailable,
+            selectedShapeIndex = null,
+            hoverPreviewCells = emptySet(),
+            prospectiveRows = emptySet(),
+            prospectiveCols = emptySet(),
+            clearingCells = emptySet(),
+            comboBannerText = banner,
+            scorePopups = emptyList(),
+            gameMode = session.gameMode,
+            dailyDate = dateStr,
+            dailyFormattedDate = dateFormatted,
+            dailyPuzzleTitle = puzzleTitle,
+            dailyBatchIndex = session.dailyBatchIndex,
+            dailyTargetScore = targetScore,
+            dailyGlobalRecord = maxOf(baseGlobalRecord, liveTopRecord),
+            canUndo = false,
+            hammerCount = session.hammerCount,
+            isHammerActive = false,
+            dailyMissions = dailyMissions,
+            unclaimedMissionsCount = unclaimedCount,
+            difficultyLevel = resumedTier.level,
+            difficultyTitle = resumedTier.title,
+            difficultyProgress = resumedProgress,
+            nextDifficultyScore = resumedTier.maxScoreExclusive,
+            timeRemainingMs = resumedTimeMs,
+            timeMaxMs = TIME_ATTACK_MAX_MS,
+            lastTimeBonusSeconds = 0,
+            gameOverReason = GameOverReason.NO_MOVES,
+            leaderboardEntries = currentState.leaderboardEntries,
+            isLeaderboardLoading = currentState.isLeaderboardLoading,
+            leaderboardError = currentState.leaderboardError,
+            totalAllTimeScore = preferences.totalAllTimeScore,
+            globalLeaderboardEntries = currentState.globalLeaderboardEntries,
+            isGlobalLeaderboardLoading = currentState.isGlobalLeaderboardLoading,
+            globalLeaderboardError = currentState.globalLeaderboardError,
+            isMusicEnabled = preferences.isMusicEnabled,
+            isSoundEnabled = preferences.isSoundEnabled,
+            isHapticsEnabled = preferences.isHapticsEnabled,
+            currentUserId = currentUserId,
+            currentUserDisplayName = currentUserDisplayName
+        )
+
+        ensureTimeAttackTimer()
+
+        if (showResumedBanner) {
+            viewModelScope.launch {
+                delay(1600)
+                _gameState.update {
+                    if (it.comboBannerText == "SESSION RESUMED") it.copy(comboBannerText = null) else it
+                }
+            }
+        }
+    }
+
+    /**
+     * Observes the global Daily Leaderboard in real time via Firestore snapshot listeners.
+     */
+    fun observeDailyLeaderboard() {
+        val repo = firestoreRepository ?: return
+        if (currentUserId.isBlank()) return
+        val dateStr = getTodayDateString()
+        leaderboardJob?.cancel()
+        _gameState.update { it.copy(isLeaderboardLoading = true, leaderboardError = null) }
+
+        leaderboardJob = viewModelScope.launch {
+            repo.observeDailyLeaderboard(dateStr)
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w(TAG, "Error observing daily leaderboard", rootError)
+                    _gameState.update {
+                        it.copy(
+                            isLeaderboardLoading = false,
+                            leaderboardError = rootError.message ?: "Unable to load leaderboard"
+                        )
+                    }
+                }
+                .collect { entries ->
+                    val topScore = entries.firstOrNull()?.score?.toInt() ?: 0
+                    _gameState.update {
+                        it.copy(
+                            leaderboardEntries = entries,
+                            isLeaderboardLoading = false,
+                            leaderboardError = null,
+                            dailyGlobalRecord = maxOf(it.dailyGlobalRecord, topScore)
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Observes the All-Time Global Leaderboard in real time via Firestore snapshot listeners.
+     */
+    fun observeGlobalLeaderboard() {
+        val repo = firestoreRepository ?: return
+        if (currentUserId.isBlank()) return
+        globalLeaderboardJob?.cancel()
+        _gameState.update { it.copy(isGlobalLeaderboardLoading = true, globalLeaderboardError = null) }
+
+        globalLeaderboardJob = viewModelScope.launch {
+            repo.observeGlobalLeaderboard()
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w(TAG, "Error observing global leaderboard", rootError)
+                    _gameState.update {
+                        it.copy(
+                            isGlobalLeaderboardLoading = false,
+                            globalLeaderboardError = rootError.message ?: "Unable to load global rankings"
+                        )
+                    }
+                }
+                .collect { entries ->
+                    val cloudOwnTotal = entries.firstOrNull { it.userId == currentUserId }?.totalScore ?: 0L
+                    if (cloudOwnTotal > preferences.totalAllTimeScore) {
+                        preferences.totalAllTimeScore = cloudOwnTotal
+                    }
+                    _gameState.update {
+                        it.copy(
+                            globalLeaderboardEntries = entries,
+                            totalAllTimeScore = maxOf(it.totalAllTimeScore, preferences.totalAllTimeScore),
+                            isGlobalLeaderboardLoading = false,
+                            globalLeaderboardError = null
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Persists the active game session to both the local JSON file and Firestore.
+     */
+    fun flushSession(syncToCloud: Boolean = true) {
+        val state = _gameState.value
+        val now = System.currentTimeMillis()
+        lastAppliedSessionTimestamp = now
+        val session = SavedGameSessionData(
+            gameMode = state.gameMode,
+            grid = state.grid,
+            activePieces = state.activePieces,
+            score = state.score,
+            comboStreak = state.comboStreak,
+            maxComboSession = state.maxComboSession,
+            linesClearedSession = state.linesClearedSession,
+            isGameOver = state.isGameOver,
+            secondChanceAvailable = state.secondChanceAvailable,
+            dailyDate = state.dailyDate.ifEmpty { getTodayDateString() },
+            dailyBatchIndex = state.dailyBatchIndex,
+            hammerCount = state.hammerCount,
+            timeRemainingMs = state.timeRemainingMs,
+            clientUpdatedAt = now
+        )
+        localSessionStorage?.saveSession(session)
+
+        if (syncToCloud &&
+            state.gameMode != GameMode.TIME_ATTACK &&
+            firestoreRepository != null &&
+            currentUserId.isNotBlank()
+        ) {
+            viewModelScope.launch {
+                firestoreRepository.saveSession(session)
+            }
+        }
     }
 
     /**
@@ -108,7 +486,9 @@ class GameViewModel(
         val isGameOver: Boolean,
         val isNewHighScore: Boolean,
         val dailyBatchIndex: Int,
-        val hammerCount: Int = 3
+        val hammerCount: Int = 3,
+        val timeRemainingMs: Long = TIME_ATTACK_INITIAL_MS,
+        val gameOverReason: GameOverReason = GameOverReason.NO_MOVES
     )
 
     private var lastUndoSnapshot: UndoSnapshot? = null
@@ -128,13 +508,30 @@ class GameViewModel(
 
     /**
      * Initializes a new game for Classic or Daily Challenge mode.
+     * In Daily Challenge mode, generates the deterministic procedural 8x8 board layout.
      */
-    fun startNewGame(mode: GameMode = _gameState.value.gameMode) {
+    fun startNewGame(
+        mode: GameMode = _gameState.value.gameMode,
+        persistFreshState: Boolean = true
+    ) {
         lastUndoSnapshot = null
         val isDaily = mode == GameMode.DAILY_CHALLENGE
+        val isTimeAttack = mode == GameMode.TIME_ATTACK
         val dateStr = getTodayDateString()
         val dateFormatted = getTodayFormattedString()
         val seed = computeDailySeed()
+
+        val initialGrid = if (isDaily) {
+            DailyPuzzleGenerator.generateInitialBoard(seed)
+        } else {
+            List(8) { List(8) { 0 } }
+        }
+
+        val puzzleTitle = if (isDaily) {
+            DailyPuzzleGenerator.getPuzzleTitle(seed)
+        } else {
+            ""
+        }
 
         val initialShapes = if (isDaily) {
             ShapeDefinitions.getDailyShapeBatch(seed, 0)
@@ -142,10 +539,10 @@ class GameViewModel(
             ShapeDefinitions.getRandomShapeBatch()
         }
 
-        val high = if (isDaily) {
-            preferences.getDailyHighScore(dateStr)
-        } else {
-            preferences.highScore
+        val high = when {
+            isDaily -> preferences.getDailyHighScore(dateStr)
+            isTimeAttack -> preferences.timeAttackHighScore
+            else -> preferences.highScore
         }
 
         if (!isDaily) {
@@ -153,14 +550,22 @@ class GameViewModel(
         }
 
         val targetScore = 4500 + ((seed % 1000).toInt())
-        val globalRecord = 8400 + ((seed % 1600).toInt())
+        val baseGlobalRecord = 8400 + ((seed % 1600).toInt())
+        val currentState = _gameState.value
+        val liveTopRecord = currentState.leaderboardEntries.firstOrNull()?.score?.toInt() ?: 0
 
         val currentHammers = preferences.hammerCount
         val dailyMissions = loadDailyMissions(dateStr)
         val unclaimedCount = dailyMissions.count { it.isCompleted && !it.isClaimed }
 
+        val banner = when {
+            isDaily -> "DAILY PUZZLE: $puzzleTitle"
+            isTimeAttack -> "TIME ATTACK! 60s GO!"
+            else -> null
+        }
+
         _gameState.value = GameState(
-            grid = List(8) { List(8) { 0 } },
+            grid = initialGrid,
             activePieces = initialShapes,
             score = 0,
             highScore = high,
@@ -175,25 +580,82 @@ class GameViewModel(
             prospectiveRows = emptySet(),
             prospectiveCols = emptySet(),
             clearingCells = emptySet(),
-            comboBannerText = if (isDaily) "DAILY CHALLENGE: $dateFormatted" else null,
+            comboBannerText = banner,
             scorePopups = emptyList(),
             gameMode = mode,
             dailyDate = dateStr,
             dailyFormattedDate = dateFormatted,
+            dailyPuzzleTitle = puzzleTitle,
             dailyBatchIndex = 0,
             dailyTargetScore = targetScore,
-            dailyGlobalRecord = globalRecord,
+            dailyGlobalRecord = maxOf(baseGlobalRecord, liveTopRecord),
             canUndo = false,
             hammerCount = currentHammers,
             isHammerActive = false,
             dailyMissions = dailyMissions,
-            unclaimedMissionsCount = unclaimedCount
+            unclaimedMissionsCount = unclaimedCount,
+            difficultyLevel = DifficultyTier.STARTER.level,
+            difficultyTitle = DifficultyTier.STARTER.title,
+            difficultyProgress = 0f,
+            nextDifficultyScore = DifficultyTier.STARTER.maxScoreExclusive,
+            timeRemainingMs = TIME_ATTACK_INITIAL_MS,
+            timeMaxMs = TIME_ATTACK_MAX_MS,
+            lastTimeBonusSeconds = 0,
+            gameOverReason = GameOverReason.NO_MOVES,
+            leaderboardEntries = currentState.leaderboardEntries,
+            isLeaderboardLoading = currentState.isLeaderboardLoading,
+            leaderboardError = currentState.leaderboardError,
+            totalAllTimeScore = preferences.totalAllTimeScore,
+            globalLeaderboardEntries = currentState.globalLeaderboardEntries,
+            isGlobalLeaderboardLoading = currentState.isGlobalLeaderboardLoading,
+            globalLeaderboardError = currentState.globalLeaderboardError,
+            isMusicEnabled = preferences.isMusicEnabled,
+            isSoundEnabled = preferences.isSoundEnabled,
+            isHapticsEnabled = preferences.isHapticsEnabled,
+            currentUserId = currentUserId,
+            currentUserDisplayName = currentUserDisplayName
         )
+
+        ensureTimeAttackTimer()
+
+        if (isTimeAttack) {
+            viewModelScope.launch {
+                delay(1400)
+                _gameState.update {
+                    if (it.comboBannerText == "TIME ATTACK! 60s GO!") it.copy(comboBannerText = null) else it
+                }
+            }
+        }
+
+        if (persistFreshState) {
+            flushSession(syncToCloud = true)
+        }
     }
 
     fun switchGameMode(mode: GameMode) {
         if (_gameState.value.gameMode == mode) return
-        startNewGame(mode)
+        stopTimeAttackTimer()
+        // Persist current mode state before switching
+        flushSession(syncToCloud = false)
+
+        val today = getTodayDateString()
+        val savedForMode = localSessionStorage?.loadSession(mode)
+        if (isSessionResumable(savedForMode, today)) {
+            applySavedSession(savedForMode!!, showResumedBanner = true)
+            return
+        }
+
+        startNewGame(mode = mode, persistFreshState = false)
+
+        if (mode != GameMode.TIME_ATTACK && firestoreRepository != null && currentUserId.isNotBlank()) {
+            viewModelScope.launch {
+                val cloud = firestoreRepository.loadSession(mode).getOrNull()
+                if (isSessionResumable(cloud, today) && _gameState.value.gameMode == mode && _gameState.value.score == 0) {
+                    applySavedSession(cloud!!, showResumedBanner = true)
+                    localSessionStorage?.saveSession(cloud)
+                }
+            }
+        }
     }
 
     /**
@@ -203,8 +665,12 @@ class GameViewModel(
     fun undoLastMove(): Boolean {
         val snapshot = lastUndoSnapshot ?: return false
         lastUndoSnapshot = null
+        hasUserInteractedThisSession = true
 
         preferences.hammerCount = snapshot.hammerCount
+
+        val revertedTier = DifficultyTier.fromScore(snapshot.score)
+        val revertedProgress = DifficultyTier.progressToNextTier(snapshot.score)
 
         _gameState.update {
             it.copy(
@@ -213,12 +679,17 @@ class GameViewModel(
                 score = snapshot.score,
                 highScore = snapshot.highScore,
                 comboStreak = snapshot.comboStreak,
+                comboEventId = 0L,
+                lastClearedLinesCount = 0,
                 maxComboSession = snapshot.maxComboSession,
                 linesClearedSession = snapshot.linesClearedSession,
                 isGameOver = snapshot.isGameOver,
+                gameOverReason = snapshot.gameOverReason,
                 isNewHighScore = snapshot.isNewHighScore,
                 dailyBatchIndex = snapshot.dailyBatchIndex,
                 hammerCount = snapshot.hammerCount,
+                timeRemainingMs = snapshot.timeRemainingMs,
+                lastTimeBonusSeconds = 0,
                 isHammerActive = false,
                 selectedShapeIndex = null,
                 hoverRow = null,
@@ -230,21 +701,46 @@ class GameViewModel(
                 lineClearBursts = emptyList(),
                 comboBannerText = "MOVE UNDONE",
                 scorePopups = emptyList(),
+                difficultyLevel = revertedTier.level,
+                difficultyTitle = revertedTier.title,
+                difficultyProgress = revertedProgress,
+                nextDifficultyScore = revertedTier.maxScoreExclusive,
                 canUndo = false
             )
         }
 
+        ensureTimeAttackTimer()
         soundManager.playPickup()
         triggerHaptic(HapticEffect.Pickup)
+        flushSession(syncToCloud = true)
         return true
     }
 
     fun getDailyStreak(): Int = preferences.dailyStreak
 
+    fun setMusicForegrounded(foregrounded: Boolean) {
+        soundManager.setMusicForegrounded(foregrounded)
+    }
+
+    fun toggleMusic(): Boolean {
+        val newVal = !preferences.isMusicEnabled
+        preferences.isMusicEnabled = newVal
+        soundManager.isMusicEnabled = newVal
+        _gameState.update { it.copy(isMusicEnabled = newVal) }
+        if (soundManager.isSoundEnabled) {
+            soundManager.playClick()
+        }
+        return newVal
+    }
+
     fun toggleSound(): Boolean {
         val newVal = !soundManager.isSoundEnabled
         soundManager.isSoundEnabled = newVal
         preferences.isSoundEnabled = newVal
+        _gameState.update { it.copy(isSoundEnabled = newVal) }
+        if (newVal) {
+            soundManager.playClick()
+        }
         return newVal
     }
 
@@ -252,6 +748,10 @@ class GameViewModel(
         val newVal = !soundManager.isHapticsEnabled
         soundManager.isHapticsEnabled = newVal
         preferences.isHapticsEnabled = newVal
+        _gameState.update { it.copy(isHapticsEnabled = newVal) }
+        if (newVal) {
+            triggerHaptic(HapticEffect.Pickup)
+        }
         return newVal
     }
 
@@ -271,18 +771,10 @@ class GameViewModel(
         }
     }
 
-    /**
-     * Validates whether [shape] can be placed at ([startRow], [startCol])
-     * on the current active 8x8 grid.
-     */
     fun canPlaceShape(shape: BlockShape, startRow: Int, startCol: Int): Boolean {
         return canPlaceShape(_gameState.value.grid, shape, startRow, startCol)
     }
 
-    /**
-     * Validates whether [shape] can be placed at ([startRow], [startCol])
-     * on the provided 2D list grid.
-     */
     fun canPlaceShape(
         grid: List<List<Int>>,
         shape: BlockShape,
@@ -306,9 +798,6 @@ class GameViewModel(
         return true
     }
 
-    /**
-     * Overload for canPlaceShape using a 2D Array (Array<IntArray>).
-     */
     fun canPlaceShape(
         grid: Array<IntArray>,
         shape: BlockShape,
@@ -332,9 +821,6 @@ class GameViewModel(
         return true
     }
 
-    /**
-     * Checks if [shape] can fit anywhere across the 64 positions on the grid.
-     */
     fun canFitAnywhere(grid: List<List<Int>>, shape: BlockShape): Boolean {
         for (r in 0 until 8) {
             for (c in 0 until 8) {
@@ -346,22 +832,14 @@ class GameViewModel(
         return false
     }
 
-    /**
-     * Evaluates if any of the remaining shapes can fit anywhere on the 8x8 board.
-     * Returns true if no valid move exists for any remaining piece.
-     */
     fun checkGameOver(): Boolean {
         return checkGameOver(_gameState.value.grid, _gameState.value.activePieces)
     }
 
-    /**
-     * Evaluates if any piece in [remainingPieces] can fit anywhere on [grid].
-     */
     fun checkGameOver(grid: List<List<Int>>, remainingPieces: List<BlockShape?>): Boolean {
         val nonNullPieces = remainingPieces.filterNotNull()
         if (nonNullPieces.isEmpty()) return false
 
-        // Check if ANY remaining piece can fit ANYWHERE on the 8x8 grid
         for (piece in nonNullPieces) {
             if (canFitAnywhere(grid, piece)) {
                 return false
@@ -370,9 +848,6 @@ class GameViewModel(
         return true
     }
 
-    /**
-     * 2D Array overload for checkGameOver.
-     */
     fun checkGameOver(grid: Array<IntArray>, remainingPieces: List<BlockShape?>): Boolean {
         val nonNullPieces = remainingPieces.filterNotNull()
         if (nonNullPieces.isEmpty()) return false
@@ -420,7 +895,6 @@ class GameViewModel(
                 }
             }
 
-            // Calculate prospective rows and cols that would clear
             val prospectiveRows = mutableSetOf<Int>()
             val prospectiveCols = mutableSetOf<Int>()
 
@@ -467,8 +941,8 @@ class GameViewModel(
         if (!canPlaceShape(currentState.grid, shape, targetRow, targetCol)) {
             return false
         }
+        hasUserInteractedThisSession = true
 
-        // Save undo snapshot before applying the move
         lastUndoSnapshot = UndoSnapshot(
             grid = currentState.grid,
             activePieces = currentState.activePieces,
@@ -480,26 +954,23 @@ class GameViewModel(
             isGameOver = currentState.isGameOver,
             isNewHighScore = currentState.isNewHighScore,
             dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount
+            hammerCount = currentState.hammerCount,
+            timeRemainingMs = currentState.timeRemainingMs,
+            gameOverReason = currentState.gameOverReason
         )
 
-        // Place cells onto grid
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
-        val placedCells = mutableListOf<Pair<Int, Int>>()
         for (r in 0 until shape.height) {
             for (c in 0 until shape.width) {
                 if (shape.matrix[r][c]) {
                     newGrid[targetRow + r][targetCol + c] = shape.colorId
-                    placedCells.add(Pair(targetRow + r, targetCol + c))
                 }
             }
         }
 
-        // Base points
         val basePoints = shape.cellCount * 10
         soundManager.playPlace()
 
-        // Check for completed rows and columns
         val completedRows = mutableListOf<Int>()
         val completedCols = mutableListOf<Int>()
 
@@ -524,7 +995,6 @@ class GameViewModel(
             newCombo = currentState.comboStreak + 1
             linePoints = totalLines * 100 * newCombo
 
-            // Multi-line bonus
             val bonus = when (totalLines) {
                 2 -> 100
                 3 -> 300
@@ -533,7 +1003,6 @@ class GameViewModel(
             }
             linePoints += bonus
 
-            // Collect clearing coordinates and generate particle bursts with block colors
             for (r in completedRows) {
                 for (c in 0 until 8) {
                     clearingCoords.add(Pair(r, c))
@@ -561,7 +1030,6 @@ class GameViewModel(
                 )
             }
 
-            // Clear the cells
             for (coord in clearingCoords) {
                 newGrid[coord.first][coord.second] = 0
             }
@@ -578,19 +1046,20 @@ class GameViewModel(
 
         val totalMovePoints = basePoints + linePoints
         val newScore = currentState.score + totalMovePoints
-        var newHigh = maxOf(newScore, currentState.highScore)
+        val newHigh = maxOf(newScore, currentState.highScore)
         val isDaily = currentState.gameMode == GameMode.DAILY_CHALLENGE
-        val isNewRecord = if (isDaily) {
-            newScore > preferences.getDailyHighScore(currentState.dailyDate)
-        } else {
-            newScore > preferences.highScore
+        val isTimeAttack = currentState.gameMode == GameMode.TIME_ATTACK
+        val isNewRecord = when {
+            isDaily -> newScore > preferences.getDailyHighScore(currentState.dailyDate)
+            isTimeAttack -> newScore > preferences.timeAttackHighScore
+            else -> newScore > preferences.highScore
         }
 
         if (isNewRecord) {
-            if (isDaily) {
-                preferences.setDailyHighScore(currentState.dailyDate, newScore)
-            } else {
-                preferences.highScore = newScore
+            when {
+                isDaily -> preferences.setDailyHighScore(currentState.dailyDate, newScore)
+                isTimeAttack -> preferences.timeAttackHighScore = newScore
+                else -> preferences.highScore = newScore
             }
         }
         if (newCombo > preferences.highestCombo) {
@@ -598,7 +1067,6 @@ class GameViewModel(
         }
         preferences.totalLinesCleared = preferences.totalLinesCleared + totalLines
 
-        // Update pieces pool
         val updatedPieces = currentState.activePieces.toMutableList()
         updatedPieces[shapeIndex] = null
 
@@ -606,30 +1074,57 @@ class GameViewModel(
         val finalPieces = if (updatedPieces.all { it == null }) {
             if (isDaily) {
                 nextBatchIndex++
-                ShapeDefinitions.getDailyShapeBatch(computeDailySeed(), nextBatchIndex)
+                ShapeDefinitions.getDailyShapeBatch(computeDailySeed(), nextBatchIndex, currentScore = newScore)
             } else {
-                ShapeDefinitions.getRandomShapeBatch()
+                ShapeDefinitions.getRandomShapeBatch(currentScore = newScore)
             }
         } else {
             updatedPieces
         }
 
-        // Popup and combo text
-        val bannerText = when {
+        val bonusMs = if (isTimeAttack && totalLines > 0) {
+            (totalLines * TIME_ATTACK_BONUS_PER_LINE_MS) +
+                (if (newCombo >= 2) TIME_ATTACK_COMBO_BONUS_MS else 0L)
+        } else {
+            0L
+        }
+        val updatedTimeMs = if (isTimeAttack) {
+            (currentState.timeRemainingMs + bonusMs).coerceAtMost(TIME_ATTACK_MAX_MS)
+        } else {
+            currentState.timeRemainingMs
+        }
+        val bonusSeconds = (bonusMs / 1000L).toInt()
+
+        val oldTier = DifficultyTier.fromScore(currentState.score)
+        val newTier = DifficultyTier.fromScore(newScore)
+        val tierProgress = DifficultyTier.progressToNextTier(newScore)
+        val leveledUp = newTier.level > oldTier.level
+        if (leveledUp && totalLines == 0) {
+            soundManager.playPowerup()
+            triggerHaptic(HapticEffect.PowerUp)
+        }
+
+        val baseBannerText = when {
             totalLines >= 3 -> "MEGA BLAST! +$totalMovePoints"
             totalLines == 2 -> "DOUBLE LINE! +$totalMovePoints"
             newCombo >= 2 -> "COMBO x$newCombo! +$totalMovePoints"
             totalLines == 1 -> "LINE CLEAR! +$totalMovePoints"
             else -> null
         }
+        val withTimeBonusBanner = if (bonusSeconds > 0 && baseBannerText != null) {
+            "+${bonusSeconds}s TIME! $baseBannerText"
+        } else {
+            baseBannerText
+        }
+        val bannerText = when {
+            leveledUp && withTimeBonusBanner != null -> "LV ${newTier.level} ${newTier.title}! $withTimeBonusBanner"
+            leveledUp -> "DIFFICULTY UP! LV ${newTier.level} ${newTier.title}"
+            else -> withTimeBonusBanner
+        }
 
-        // Floating text popups at coordinates of the clear
         val popups = mutableListOf<ScorePopup>()
-
         if (totalLines > 0) {
             val ptsPerLine = linePoints / totalLines
-
-            // If rows and columns clear together, spawn at their intersection coordinates
             if (completedRows.isNotEmpty() && completedCols.isNotEmpty()) {
                 for (r in completedRows) {
                     for (c in completedCols) {
@@ -646,7 +1141,6 @@ class GameViewModel(
                     }
                 }
             } else {
-                // Completed rows: center is (row, 3.5f)
                 for (r in completedRows) {
                     val text = if (newCombo > 1) "+$ptsPerLine x$newCombo" else "+$ptsPerLine"
                     popups.add(
@@ -659,8 +1153,6 @@ class GameViewModel(
                         )
                     )
                 }
-
-                // Completed columns: center is (3.5f, col)
                 for (c in completedCols) {
                     val text = if (newCombo > 1) "+$ptsPerLine x$newCombo" else "+$ptsPerLine"
                     popups.add(
@@ -675,7 +1167,6 @@ class GameViewModel(
                 }
             }
         } else {
-            // Standard placement points popup at placement position
             popups.add(
                 ScorePopup(
                     text = "+$basePoints",
@@ -688,6 +1179,13 @@ class GameViewModel(
 
         val frozenGrid = newGrid.map { it.toList() }
         val isGameOver = checkGameOver(frozenGrid, finalPieces)
+        val updatedMaxCombo = maxOf(currentState.maxComboSession, newCombo)
+        val updatedLines = currentState.linesClearedSession + totalLines
+        val updatedAllTimeTotal = if (totalMovePoints > 0) {
+            preferences.addToTotalAllTimeScore(totalMovePoints)
+        } else {
+            preferences.totalAllTimeScore
+        }
 
         _gameState.update {
             it.copy(
@@ -695,10 +1193,14 @@ class GameViewModel(
                 activePieces = finalPieces,
                 score = newScore,
                 highScore = newHigh,
+                totalAllTimeScore = updatedAllTimeTotal,
                 comboStreak = if (totalLines > 0) newCombo else 0,
-                maxComboSession = maxOf(currentState.maxComboSession, newCombo),
-                linesClearedSession = currentState.linesClearedSession + totalLines,
+                comboEventId = if (totalLines > 0) currentState.comboEventId + 1L else currentState.comboEventId,
+                lastClearedLinesCount = totalLines,
+                maxComboSession = updatedMaxCombo,
+                linesClearedSession = updatedLines,
                 isGameOver = isGameOver,
+                gameOverReason = if (isGameOver) GameOverReason.NO_MOVES else it.gameOverReason,
                 isNewHighScore = isNewRecord,
                 selectedShapeIndex = null,
                 hoverRow = null,
@@ -711,16 +1213,52 @@ class GameViewModel(
                 comboBannerText = bannerText,
                 scorePopups = popups,
                 canUndo = true,
-                dailyBatchIndex = nextBatchIndex
+                dailyBatchIndex = nextBatchIndex,
+                difficultyLevel = newTier.level,
+                difficultyTitle = newTier.title,
+                difficultyProgress = tierProgress,
+                nextDifficultyScore = newTier.maxScoreExclusive,
+                timeRemainingMs = updatedTimeMs,
+                lastTimeBonusSeconds = bonusSeconds
             )
         }
 
         if (isGameOver) {
+            stopTimeAttackTimer()
             if (isDaily) {
                 preferences.recordDailyGame(currentState.dailyDate, newScore)
             }
             soundManager.playGameOver()
             triggerHaptic(HapticEffect.GameOver)
+        }
+
+        // Submit Daily Challenge score to global Firestore leaderboard on new record or completion
+        if (isDaily && (isNewRecord || isGameOver) && newScore > 0 && firestoreRepository != null && currentUserId.isNotBlank()) {
+            val dailyDate = currentState.dailyDate.ifEmpty { getTodayDateString() }
+            viewModelScope.launch {
+                firestoreRepository.submitDailyScore(
+                    dateStr = dailyDate,
+                    displayName = currentUserDisplayName,
+                    score = newScore,
+                    linesCleared = updatedLines,
+                    maxCombo = updatedMaxCombo
+                )
+            }
+        }
+
+        // Increment All-Time Global Leaderboard score atomically in real time
+        if (totalMovePoints > 0 && firestoreRepository != null && currentUserId.isNotBlank()) {
+            val bestSingleGame = maxOf(newHigh, preferences.highScore)
+            val bestAllTimeCombo = maxOf(updatedMaxCombo, preferences.highestCombo)
+            viewModelScope.launch {
+                firestoreRepository.submitAllTimeScoreDelta(
+                    displayName = currentUserDisplayName,
+                    scoreDelta = totalMovePoints,
+                    bestSingleGameScore = bestSingleGame,
+                    linesDelta = totalLines,
+                    highestCombo = bestAllTimeCombo
+                )
+            }
         }
 
         // Record progress towards Daily Missions
@@ -731,14 +1269,22 @@ class GameViewModel(
         }
         recordMissionEvent(MissionType.SCORE_POINTS, totalMovePoints)
 
-        // Reset clearing animation and popup after brief duration
+        // Persist updated session locally and to Firestore
+        flushSession(syncToCloud = true)
+
         viewModelScope.launch {
             delay(400)
             _gameState.update { it.copy(clearingCells = emptySet()) }
             delay(400)
             _gameState.update { it.copy(lineClearBursts = emptyList()) }
             delay(600)
-            _gameState.update { it.copy(comboBannerText = null, scorePopups = emptyList()) }
+            _gameState.update {
+                it.copy(
+                    comboBannerText = null,
+                    scorePopups = emptyList(),
+                    lastTimeBonusSeconds = 0
+                )
+            }
         }
 
         return true
@@ -747,51 +1293,74 @@ class GameViewModel(
     fun useSecondChance() {
         val state = _gameState.value
         if (!state.secondChanceAvailable || !state.isGameOver) return
+        hasUserInteractedThisSession = true
 
         soundManager.playPowerup()
         triggerHaptic(HapticEffect.PowerUp)
 
-        // Clear center 3x3 (rows 2..4, cols 2..4) and any 1 crowded row/col to rescue player
-        val newGrid = state.grid.map { it.toMutableList() }.toMutableList()
-        for (r in 2..5) {
-            for (c in 2..5) {
-                newGrid[r][c] = 0
+        val isTimeAttack = state.gameMode == GameMode.TIME_ATTACK
+        val isTimeUp = state.gameOverReason == GameOverReason.TIME_UP
+        val boardWasBlocked = checkGameOver(state.grid, state.activePieces)
+
+        val finalGrid = if (!isTimeUp || boardWasBlocked) {
+            val newGrid = state.grid.map { it.toMutableList() }.toMutableList()
+            for (r in 2..5) {
+                for (c in 2..5) {
+                    newGrid[r][c] = 0
+                }
             }
+            val updatedGrid = newGrid.map { it.toList() }
+            if (checkGameOver(updatedGrid, state.activePieces)) {
+                val rescued = updatedGrid.map { it.toMutableList() }.toMutableList()
+                for (c in 0 until 8) {
+                    rescued[6][c] = 0
+                    rescued[7][c] = 0
+                }
+                rescued.map { it.toList() }
+            } else {
+                updatedGrid
+            }
+        } else {
+            state.grid
         }
 
-        val updatedGrid = newGrid.map { it.toList() }
-        val stillGameOver = checkGameOver(updatedGrid, state.activePieces)
-
-        // If center 3x3 wasn't enough for large pieces, also clear bottom two rows
-        val finalGrid = if (stillGameOver) {
-            val rescued = updatedGrid.map { it.toMutableList() }.toMutableList()
-            for (c in 0 until 8) {
-                rescued[6][c] = 0
-                rescued[7][c] = 0
+        val revivedTimeMs = if (isTimeAttack) {
+            if (isTimeUp) {
+                TIME_ATTACK_SECOND_CHANCE_MS
+            } else {
+                maxOf(state.timeRemainingMs, TIME_ATTACK_SECOND_CHANCE_MS)
             }
-            rescued.map { it.toList() }
         } else {
-            updatedGrid
+            state.timeRemainingMs
+        }
+
+        val reviveBanner = if (isTimeAttack) {
+            "SECOND CHANCE! +15s TIME!"
+        } else {
+            "SECOND CHANCE! BLAST REVIVE!"
         }
 
         _gameState.update {
             it.copy(
                 grid = finalGrid,
                 isGameOver = false,
+                gameOverReason = GameOverReason.NO_MOVES,
                 secondChanceAvailable = false,
-                comboBannerText = "SECOND CHANCE! BLAST REVIVE!"
+                timeRemainingMs = revivedTimeMs,
+                lastTimeBonusSeconds = if (isTimeAttack) (TIME_ATTACK_SECOND_CHANCE_MS / 1000L).toInt() else 0,
+                comboBannerText = reviveBanner
             )
         }
 
+        ensureTimeAttackTimer()
+        flushSession(syncToCloud = true)
+
         viewModelScope.launch {
             delay(1800)
-            _gameState.update { it.copy(comboBannerText = null) }
+            _gameState.update { it.copy(comboBannerText = null, lastTimeBonusSeconds = 0) }
         }
     }
 
-    /**
-     * Toggles the Hammer power-up targeting mode.
-     */
     fun toggleHammerMode() {
         val current = _gameState.value
         if (current.hammerCount <= 0 && !current.isHammerActive) {
@@ -818,12 +1387,9 @@ class GameViewModel(
         }
     }
 
-    /**
-     * Rescues the player directly from the Game Over modal by activating Hammer mode.
-     */
     fun activateHammerFromGameOver() {
         val current = _gameState.value
-        if (current.hammerCount <= 0) return
+        if (current.hammerCount <= 0 || current.gameOverReason == GameOverReason.TIME_UP) return
 
         _gameState.update {
             it.copy(
@@ -837,16 +1403,13 @@ class GameViewModel(
         triggerHaptic(HapticEffect.PowerUp)
     }
 
-    /**
-     * Uses 1 hammer power-up to smash and clear a single filled block at (row, col).
-     */
     fun useHammerOnCell(row: Int, col: Int): Boolean {
         val currentState = _gameState.value
         if (!currentState.isHammerActive || currentState.hammerCount <= 0) return false
         val cellColor = currentState.grid.getOrNull(row)?.getOrNull(col) ?: 0
-        if (cellColor == 0) return false // can only smash filled blocks
+        if (cellColor == 0) return false
+        hasUserInteractedThisSession = true
 
-        // Record Undo snapshot before smashing
         lastUndoSnapshot = UndoSnapshot(
             grid = currentState.grid,
             activePieces = currentState.activePieces,
@@ -858,10 +1421,11 @@ class GameViewModel(
             isGameOver = currentState.isGameOver,
             isNewHighScore = currentState.isNewHighScore,
             dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount
+            hammerCount = currentState.hammerCount,
+            timeRemainingMs = currentState.timeRemainingMs,
+            gameOverReason = currentState.gameOverReason
         )
 
-        // Smash the single cell
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
         newGrid[row][col] = 0
         val frozenGrid = newGrid.map { it.toList() }
@@ -869,7 +1433,6 @@ class GameViewModel(
         val newHammerCount = (currentState.hammerCount - 1).coerceAtLeast(0)
         preferences.hammerCount = newHammerCount
 
-        // Sound, haptics, particle burst
         soundManager.playHammerSmash()
         triggerHaptic(HapticEffect.HammerSmash)
 
@@ -882,7 +1445,6 @@ class GameViewModel(
             isColClear = true
         )
 
-        // Re-check game over state now that the block is removed
         val stillGameOver = checkGameOver(frozenGrid, currentState.activePieces)
 
         _gameState.update {
@@ -898,6 +1460,7 @@ class GameViewModel(
         }
 
         recordMissionEvent(MissionType.USE_HAMMER, 1)
+        flushSession(syncToCloud = true)
 
         viewModelScope.launch {
             delay(400)
@@ -909,9 +1472,6 @@ class GameViewModel(
         return true
     }
 
-    /**
-     * Loads the 3 deterministic daily missions for the given date from preferences.
-     */
     fun loadDailyMissions(dateStr: String): List<DailyMission> {
         val baseMissions = DailyMissionGenerator.generateMissionsForDate(dateStr)
         return baseMissions.map { mission ->
@@ -925,9 +1485,6 @@ class GameViewModel(
         }
     }
 
-    /**
-     * Refreshes the daily missions state from storage.
-     */
     fun refreshDailyMissions() {
         val dateStr = getTodayDateString()
         val missions = loadDailyMissions(dateStr)
@@ -940,9 +1497,6 @@ class GameViewModel(
         }
     }
 
-    /**
-     * Increments mission progress for the active day and persists to preferences.
-     */
     fun recordMissionEvent(type: MissionType, amount: Int) {
         val dateStr = getTodayDateString()
         val currentMissions = _gameState.value.dailyMissions.ifEmpty {
@@ -983,9 +1537,6 @@ class GameViewModel(
         }
     }
 
-    /**
-     * Claims the hammer reward for a completed daily mission.
-     */
     fun claimMissionReward(missionId: String): Boolean {
         val currentState = _gameState.value
         val mission = currentState.dailyMissions.find { it.id == missionId } ?: return false
@@ -1012,6 +1563,8 @@ class GameViewModel(
             )
         }
 
+        flushSession(syncToCloud = true)
+
         viewModelScope.launch {
             delay(1500)
             _gameState.update { it.copy(comboBannerText = null) }
@@ -1020,15 +1573,42 @@ class GameViewModel(
         return true
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        soundManager.setMusicForegrounded(false)
+        stopTimeAttackTimer()
+        leaderboardJob?.cancel()
+        globalLeaderboardJob?.cancel()
+    }
+
     companion object {
+        private const val TAG = "GameViewModel"
+        const val TIME_ATTACK_INITIAL_MS = 60_000L
+        const val TIME_ATTACK_MAX_MS = 99_000L
+        const val TIME_ATTACK_BONUS_PER_LINE_MS = 4_000L
+        const val TIME_ATTACK_COMBO_BONUS_MS = 1_000L
+        const val TIME_ATTACK_SECOND_CHANCE_MS = 15_000L
+
         fun provideFactory(
             context: Context,
             soundManager: SoundManager,
-            preferences: GamePreferences
+            preferences: GamePreferences,
+            localSessionStorage: LocalSessionStorage? = LocalSessionStorage(context),
+            firestoreRepository: GameFirestoreRepository? = null,
+            currentUserId: String = "",
+            currentUserDisplayName: String = "Player"
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return GameViewModel(context, soundManager, preferences) as T
+                return GameViewModel(
+                    context = context,
+                    soundManager = soundManager,
+                    preferences = preferences,
+                    localSessionStorage = localSessionStorage,
+                    firestoreRepository = firestoreRepository,
+                    currentUserId = currentUserId,
+                    currentUserDisplayName = currentUserDisplayName
+                ) as T
             }
         }
     }

@@ -21,15 +21,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Vibration
-import androidx.compose.material.icons.filled.VolumeMute
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
 import com.example.model.GameMode
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,20 +54,32 @@ fun ScoreHeader(
     score: Int,
     highScore: Int,
     comboStreak: Int,
-    isSoundEnabled: Boolean,
-    isHapticsEnabled: Boolean,
+    isSoundEnabled: Boolean = true,
+    isHapticsEnabled: Boolean = true,
     canUndo: Boolean = false,
     gameMode: GameMode = GameMode.CLASSIC,
     dailyGlobalRecord: Int = 8540,
     dailyTargetScore: Int = 5000,
     dailyStreak: Int = 0,
+    dailyPuzzleTitle: String = "",
     hammerCount: Int = 3,
     isHammerActive: Boolean = false,
     unclaimedMissions: Int = 0,
-    onToggleSound: () -> Unit,
-    onToggleHaptics: () -> Unit,
+    difficultyLevel: Int = 1,
+    difficultyTitle: String = "STARTER",
+    difficultyProgress: Float = 0f,
+    nextDifficultyScore: Int? = 500,
+    timeRemainingMs: Long = 60_000L,
+    timeMaxMs: Long = 99_000L,
+    lastTimeBonusSeconds: Int = 0,
+    onToggleSound: () -> Unit = {},
+    onToggleHaptics: () -> Unit = {},
+    onShowSettings: () -> Unit = {},
     onShowStats: () -> Unit,
     onShowTutorial: () -> Unit = {},
+    onShowLeaderboard: () -> Unit = {},
+    onShowDailyLeaderboard: () -> Unit = onShowLeaderboard,
+    onSignOut: () -> Unit = {},
     onUndo: () -> Unit = {},
     onToggleHammer: () -> Unit = {},
     onShowMissions: () -> Unit = {},
@@ -111,10 +123,10 @@ fun ScoreHeader(
                 }
                 Text(
                     text = "BLOCK BLAST",
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = 14.sp,
                     color = Color.White,
                     fontWeight = FontWeight.Black,
-                    letterSpacing = 0.8.sp
+                    letterSpacing = 0.6.sp
                 )
             }
 
@@ -124,29 +136,15 @@ fun ScoreHeader(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = onToggleSound,
+                    onClick = onShowLeaderboard,
                     modifier = Modifier
                         .size(30.dp)
-                        .testTag("toggle_sound_button")
+                        .testTag("leaderboard_button")
                 ) {
                     Icon(
-                        imageVector = if (isSoundEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
-                        contentDescription = if (isSoundEnabled) "Mute sound" else "Enable sound",
-                        tint = if (isSoundEnabled) Color(0xFF00E5FF) else Color.Gray,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = onToggleHaptics,
-                    modifier = Modifier
-                        .size(30.dp)
-                        .testTag("toggle_haptics_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Vibration,
-                        contentDescription = if (isHapticsEnabled) "Disable vibration" else "Enable vibration",
-                        tint = if (isHapticsEnabled) Color(0xFFFF9800) else Color.Gray,
+                        imageVector = Icons.Default.EmojiEvents,
+                        contentDescription = "Global & Daily Leaderboards",
+                        tint = GoldAccent,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -214,12 +212,42 @@ fun ScoreHeader(
                         modifier = Modifier.size(16.dp)
                     )
                 }
+
+                IconButton(
+                    onClick = onShowSettings,
+                    modifier = Modifier
+                        .size(30.dp)
+                        .background(Color(0x2200E5FF), CircleShape)
+                        .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.45f), CircleShape)
+                        .testTag("settings_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Audio & Game Settings",
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onSignOut,
+                    modifier = Modifier
+                        .size(30.dp)
+                        .testTag("sign_out_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Logout,
+                        contentDescription = "Sign Out",
+                        tint = Color(0xFFFF8A80),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Mode Switcher: Classic vs Daily Challenge
+        // Mode Switcher: Classic vs Time Attack vs Daily Challenge
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -249,11 +277,53 @@ fun ScoreHeader(
             ) {
                 Text(
                     text = "CLASSIC",
-                    fontSize = 10.sp,
+                    fontSize = 9.sp,
                     fontWeight = if (isClassic) FontWeight.Black else FontWeight.Bold,
                     color = if (isClassic) Color.White else Color(0xFF8E9BB0),
-                    letterSpacing = 0.5.sp
+                    letterSpacing = 0.4.sp,
+                    maxLines = 1,
+                    softWrap = false
                 )
+            }
+
+            // Time Attack Tab
+            val isTimeAttack = gameMode == GameMode.TIME_ATTACK
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(25.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(
+                        if (isTimeAttack) {
+                            Brush.horizontalGradient(listOf(Color(0xFFFF1744), Color(0xFFFF6D00)))
+                        } else {
+                            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                        }
+                    )
+                    .clickable { onSwitchMode(GameMode.TIME_ATTACK) }
+                    .testTag("mode_tab_time_attack"),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = null,
+                        tint = if (isTimeAttack) Color.White else Color(0xFFFF5252),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = "TIME ATTACK",
+                        fontSize = 9.sp,
+                        fontWeight = if (isTimeAttack) FontWeight.Black else FontWeight.Bold,
+                        color = if (isTimeAttack) Color.White else Color(0xFF8E9BB0),
+                        letterSpacing = 0.3.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
 
             // Daily Challenge Tab
@@ -282,20 +352,136 @@ fun ScoreHeader(
                         imageVector = Icons.Default.CalendarToday,
                         contentDescription = null,
                         tint = if (isDaily) Color(0xFF0F111E) else Color(0xFFFF9800),
-                        modifier = Modifier.size(11.dp)
+                        modifier = Modifier.size(10.dp)
                     )
                     Text(
-                        text = "DAILY CHALLENGE",
-                        fontSize = 10.sp,
+                        text = "DAILY",
+                        fontSize = 9.sp,
                         fontWeight = if (isDaily) FontWeight.Black else FontWeight.Bold,
                         color = if (isDaily) Color(0xFF0F111E) else Color(0xFF8E9BB0),
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.4.sp,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
         }
 
-        // Daily Challenge Info Banner (Compact inline strip)
+        // Time Attack Countdown HUD Banner
+        if (gameMode == GameMode.TIME_ATTACK) {
+            Spacer(modifier = Modifier.height(3.dp))
+            val totalSeconds = ((timeRemainingMs + 999L) / 1000L).toInt().coerceAtLeast(0)
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            val formattedTime = String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+            val isUrgent = timeRemainingMs in 1L..10_000L
+            val isExpired = timeRemainingMs <= 0L
+            val timerAccent = when {
+                isExpired || isUrgent -> Color(0xFFFF5252)
+                lastTimeBonusSeconds > 0 -> Color(0xFF00E676)
+                else -> Color(0xFF00E5FF)
+            }
+            val progressFraction = if (timeRemainingMs <= 0L) {
+                0f
+            } else {
+                (timeRemainingMs.toFloat() / 60_000f).coerceIn(0.02f, 1f)
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            if (isUrgent || isExpired) {
+                                listOf(Color(0xFF2D0D16), Color(0xFF1F1220))
+                            } else {
+                                listOf(Color(0xFF0E1D2B), Color(0xFF15182E))
+                            }
+                        )
+                    )
+                    .border(1.dp, timerAccent.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .testTag("time_attack_timer_banner")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = "Time Remaining",
+                            tint = timerAccent,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = formattedTime,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            color = timerAccent,
+                            letterSpacing = 0.8.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.testTag("time_attack_timer_text")
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFF1A2138))
+                    ) {
+                        if (progressFraction > 0f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(progressFraction)
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            if (isUrgent || isExpired) {
+                                                listOf(Color(0xFFFF1744), Color(0xFFFF9100))
+                                            } else {
+                                                listOf(Color(0xFF00E5FF), Color(0xFF00E676))
+                                            }
+                                        )
+                                    )
+                            )
+                        }
+                    }
+
+                    if (lastTimeBonusSeconds > 0) {
+                        Text(
+                            text = "+${lastTimeBonusSeconds}s!",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF00E676),
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.testTag("time_attack_bonus_badge")
+                        )
+                    } else {
+                        Text(
+                            text = "+4s / LINE",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFFB74D),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+        }
+
+        // Daily Challenge Info Banner (Compact clickable strip opening Daily Leaderboard)
         if (gameMode == GameMode.DAILY_CHALLENGE) {
             Spacer(modifier = Modifier.height(3.dp))
             Box(
@@ -312,6 +498,7 @@ fun ScoreHeader(
                         Brush.horizontalGradient(listOf(Color(0xFFFFD700), Color(0xFFFF9800))),
                         RoundedCornerShape(8.dp)
                     )
+                    .clickable { onShowDailyLeaderboard() }
                     .padding(horizontal = 8.dp, vertical = 3.dp)
                     .testTag("daily_challenge_banner")
             ) {
@@ -326,12 +513,16 @@ fun ScoreHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Default.EmojiEvents,
-                            contentDescription = null,
+                            contentDescription = "Open Daily Leaderboard",
                             tint = GoldAccent,
                             modifier = Modifier.size(12.dp)
                         )
                         Text(
-                            text = "RECORD: $dailyGlobalRecord",
+                            text = if (dailyPuzzleTitle.isNotBlank()) {
+                                "$dailyPuzzleTitle • #$dailyGlobalRecord"
+                            } else {
+                                "TOP: $dailyGlobalRecord"
+                            },
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = GoldAccent
@@ -346,7 +537,7 @@ fun ScoreHeader(
                     )
 
                     Text(
-                        text = "🔥 ${dailyStreak}d STREAK",
+                        text = "🏆 RANKS",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
                         color = Color(0xFFFFB74D)
@@ -534,7 +725,11 @@ fun ScoreHeader(
                         )
                         Column {
                             Text(
-                                text = if (gameMode == GameMode.DAILY_CHALLENGE) "RECORD" else "BEST",
+                                text = when (gameMode) {
+                                    GameMode.DAILY_CHALLENGE -> "RECORD"
+                                    GameMode.TIME_ATTACK -> "TIME BEST"
+                                    else -> "BEST"
+                                },
                                 fontSize = 8.sp,
                                 color = GoldAccent,
                                 fontWeight = FontWeight.Bold,
@@ -550,6 +745,72 @@ fun ScoreHeader(
                     }
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Progressive Difficulty Tier Strip
+        val tierAccent = when (difficultyLevel) {
+            1 -> Color(0xFF00E5FF)
+            2 -> Color(0xFF00E676)
+            3 -> Color(0xFFFFB300)
+            4 -> Color(0xFFFF4081)
+            else -> GoldAccent
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF101424))
+                .border(1.dp, tierAccent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(tierAccent.copy(alpha = 0.16f))
+                    .border(0.8.dp, tierAccent.copy(alpha = 0.7f), RoundedCornerShape(5.dp))
+                    .padding(horizontal = 6.dp, vertical = 1.dp)
+            ) {
+                Text(
+                    text = "LV $difficultyLevel $difficultyTitle",
+                    fontSize = 9.sp,
+                    color = tierAccent,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.4.sp,
+                    modifier = Modifier.testTag("difficulty_badge")
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFF1A2138))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(difficultyProgress.coerceIn(0.04f, 1f))
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(tierAccent.copy(alpha = 0.75f), tierAccent)
+                            )
+                        )
+                )
+            }
+
+            Text(
+                text = if (nextDifficultyScore != null) "NEXT $nextDifficultyScore" else "MAX TIER",
+                fontSize = 8.sp,
+                color = Color(0xFF8E9BB0),
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.3.sp
+            )
         }
 
         Spacer(modifier = Modifier.height(4.dp))

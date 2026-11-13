@@ -1,12 +1,15 @@
 package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,7 +30,9 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,6 +109,27 @@ fun ComboStreakMeter(
         label = "glow_alpha"
     )
 
+    // Pop-up spring scale whenever comboStreak increases
+    val badgePopScale = remember { Animatable(1f) }
+    LaunchedEffect(comboStreak) {
+        if (comboStreak > 0) {
+            badgePopScale.snapTo(0.75f)
+            badgePopScale.animateTo(
+                targetValue = 1.22f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            )
+            badgePopScale.animateTo(
+                targetValue = 1.0f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)
+            )
+        } else {
+            badgePopScale.snapTo(1f)
+        }
+    }
+
     val activeGradient = TierGradients[tierIndex]
     val activeColor = TierPrimaryColors[tierIndex]
 
@@ -160,7 +186,7 @@ fun ComboStreakMeter(
                 // Right: Compact Multiplier Badge
                 Box(
                     modifier = Modifier
-                        .scale(if (isStreakActive) pulseScale else 1f)
+                        .scale(if (isStreakActive) pulseScale * badgePopScale.value else 1f)
                         .clip(RoundedCornerShape(6.dp))
                         .background(
                             if (isStreakActive) {

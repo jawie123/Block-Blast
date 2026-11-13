@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -55,15 +56,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.audio.AppHaptics
 import com.example.audio.HapticEffect
 import com.example.model.BlockShape
+import com.example.model.GameMode
+import com.example.ui.components.ComboMultiplierHud
+import com.example.ui.components.DailyLeaderboardDialog
 import com.example.ui.components.DailyMissionsDialog
 import com.example.ui.components.GridBoard
 import com.example.ui.components.GameOverDialog
+import com.example.ui.components.LeaderboardTab
 import com.example.ui.components.PieceDeck
 import com.example.ui.components.PieceSlot
 import com.example.ui.components.ScoreHeader
+import com.example.ui.components.SettingsDialog
 import com.example.ui.components.ShapeRenderer
 import com.example.ui.components.StatsDialog
 import com.example.ui.components.TutorialOverlay
@@ -73,6 +82,7 @@ import com.example.viewmodel.GameViewModel
 @Composable
 fun GameScreen(
     viewModel: GameViewModel,
+    onSignOut: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val gameState by viewModel.gameState.collectAsState()
@@ -82,6 +92,60 @@ fun GameScreen(
     // Haptic feedback & context
     val hapticFeedback = LocalHapticFeedback.current
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Dialog state
+    var showStatsDialog by remember { mutableStateOf(false) }
+    var showMissionsDialog by remember { mutableStateOf(false) }
+    var showLeaderboardDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.ALL_TIME) }
+    var isLifecyclePaused by remember { mutableStateOf(false) }
+
+    // Flush active game session, pause Time Attack countdown, and manage music when app backgrounds
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    isLifecyclePaused = true
+                    viewModel.setTimeAttackPaused(true)
+                    viewModel.setMusicForegrounded(false)
+                    viewModel.flushSession(syncToCloud = true)
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    isLifecyclePaused = false
+                    viewModel.setMusicForegrounded(true)
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            viewModel.setMusicForegrounded(false)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Pause Time Attack clock while tutorial, dialogs, game over, or lifecycle pause are active
+    LaunchedEffect(
+        isLifecyclePaused,
+        showTutorial,
+        showStatsDialog,
+        showMissionsDialog,
+        showLeaderboardDialog,
+        showSettingsDialog,
+        gameState.isGameOver,
+        gameState.gameMode
+    ) {
+        val shouldPause = isLifecyclePaused ||
+            showTutorial ||
+            showStatsDialog ||
+            showMissionsDialog ||
+            showLeaderboardDialog ||
+            showSettingsDialog ||
+            gameState.isGameOver
+        viewModel.setTimeAttackPaused(shouldPause)
+    }
 
     // Observe and perform tactile vibrations on placement, line clears, pickups, and game over
     LaunchedEffect(viewModel) {
@@ -89,10 +153,6 @@ fun GameScreen(
             AppHaptics.perform(context, effect, hapticFeedback)
         }
     }
-
-    // Dialog state
-    var showStatsDialog by remember { mutableStateOf(false) }
-    var showMissionsDialog by remember { mutableStateOf(false) }
 
     // Board layout tracking for drag and drop
     var boardBounds by remember { mutableStateOf<Rect?>(null) }
@@ -135,8 +195,8 @@ fun GameScreen(
         val screenHeight = maxHeight
 
         // Dynamic board sizing:
-        // Reserve vertical space for compact ScoreHeader (~140dp) and PieceDeck (~110dp) + safety margin (20dp)
-        val reservedVerticalDp = 270.dp
+        // Reserve vertical space for compact ScoreHeader (~164dp + optional mode banner) and PieceDeck (~110dp)
+        val reservedVerticalDp = if (gameState.gameMode != GameMode.CLASSIC) 316.dp else 294.dp
         val maxBoardByHeight = (screenHeight - reservedVerticalDp).coerceAtLeast(220.dp)
         val maxBoardByWidth = screenWidth - 24.dp
         val boardSizeDp = minOf(maxBoardByWidth, maxBoardByHeight).coerceIn(240.dp, 400.dp)
@@ -151,20 +211,38 @@ fun GameScreen(
                 score = gameState.score,
                 highScore = gameState.highScore,
                 comboStreak = gameState.comboStreak,
-                isSoundEnabled = viewModel.soundManager.isSoundEnabled,
-                isHapticsEnabled = viewModel.soundManager.isHapticsEnabled,
+                isSoundEnabled = gameState.isSoundEnabled,
+                isHapticsEnabled = gameState.isHapticsEnabled,
                 canUndo = gameState.canUndo,
                 gameMode = gameState.gameMode,
                 dailyGlobalRecord = gameState.dailyGlobalRecord,
                 dailyTargetScore = gameState.dailyTargetScore,
                 dailyStreak = viewModel.getDailyStreak(),
+                dailyPuzzleTitle = gameState.dailyPuzzleTitle,
                 hammerCount = gameState.hammerCount,
                 isHammerActive = gameState.isHammerActive,
                 unclaimedMissions = gameState.unclaimedMissionsCount,
+                difficultyLevel = gameState.difficultyLevel,
+                difficultyTitle = gameState.difficultyTitle,
+                difficultyProgress = gameState.difficultyProgress,
+                nextDifficultyScore = gameState.nextDifficultyScore,
+                timeRemainingMs = gameState.timeRemainingMs,
+                timeMaxMs = gameState.timeMaxMs,
+                lastTimeBonusSeconds = gameState.lastTimeBonusSeconds,
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
+                onShowSettings = { showSettingsDialog = true },
                 onShowStats = { showStatsDialog = true },
                 onShowTutorial = { viewModel.openTutorial() },
+                onShowLeaderboard = {
+                    leaderboardInitialTab = LeaderboardTab.ALL_TIME
+                    showLeaderboardDialog = true
+                },
+                onShowDailyLeaderboard = {
+                    leaderboardInitialTab = LeaderboardTab.DAILY
+                    showLeaderboardDialog = true
+                },
+                onSignOut = onSignOut,
                 onUndo = { viewModel.undoLastMove() },
                 onToggleHammer = { viewModel.toggleHammerMode() },
                 onShowMissions = { showMissionsDialog = true },
@@ -172,29 +250,47 @@ fun GameScreen(
                 onRestart = { viewModel.startNewGame() }
             )
 
-            // 2. Center Section: 8x8 Game Board (Dynamically sized to guarantee zero vertical clipping)
+            // 2. Center Section: 8x8 Game Board + Live Combo Multiplier HUD Overlay
             val ghostColorId = draggingShape?.colorId
                 ?: gameState.selectedShapeIndex?.let { gameState.activePieces.getOrNull(it)?.colorId }
 
-            GridBoard(
-                gameState = gameState,
-                ghostColorId = ghostColorId,
-                onCellTapped = { row, col ->
-                    if (gameState.isHammerActive) {
-                        viewModel.useHammerOnCell(row, col)
-                    } else {
-                        val selectedIndex = gameState.selectedShapeIndex
-                        if (selectedIndex != null) {
-                            viewModel.placeShape(selectedIndex, row, col)
+            val prospectiveLinesCount =
+                gameState.prospectiveRows.size + gameState.prospectiveCols.size
+
+            Box(
+                modifier = Modifier.size(boardSizeDp),
+                contentAlignment = Alignment.Center
+            ) {
+                GridBoard(
+                    gameState = gameState,
+                    ghostColorId = ghostColorId,
+                    onCellTapped = { row, col ->
+                        if (gameState.isHammerActive) {
+                            viewModel.useHammerOnCell(row, col)
+                        } else {
+                            val selectedIndex = gameState.selectedShapeIndex
+                            if (selectedIndex != null) {
+                                viewModel.placeShape(selectedIndex, row, col)
+                            }
                         }
-                    }
-                },
-                onBoardPositioned = { bounds, cellSizePx ->
-                    boardBounds = bounds
-                    boardCellSizePx = cellSizePx
-                },
-                modifier = Modifier.size(boardSizeDp)
-            )
+                    },
+                    onBoardPositioned = { bounds, cellSizePx ->
+                        boardBounds = bounds
+                        boardCellSizePx = cellSizePx
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                ComboMultiplierHud(
+                    comboStreak = gameState.comboStreak,
+                    comboEventId = gameState.comboEventId,
+                    lastClearedLinesCount = gameState.lastClearedLinesCount,
+                    prospectiveLinesCount = prospectiveLinesCount,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp)
+                )
+            }
 
             // 3. Bottom Section: Active Piece Pool (3 slots)
             Column(
@@ -343,13 +439,47 @@ fun GameScreen(
                 secondChanceAvailable = gameState.secondChanceAvailable,
                 canUndo = gameState.canUndo,
                 gameMode = gameState.gameMode,
+                gameOverReason = gameState.gameOverReason,
                 dailyTargetScore = gameState.dailyTargetScore,
                 dailyGlobalRecord = gameState.dailyGlobalRecord,
                 hammerCount = gameState.hammerCount,
                 onUndo = { viewModel.undoLastMove() },
                 onSecondChance = { viewModel.useSecondChance() },
                 onUseHammer = { viewModel.activateHammerFromGameOver() },
+                onShowLeaderboard = {
+                    leaderboardInitialTab = LeaderboardTab.DAILY
+                    showLeaderboardDialog = true
+                },
+                onShowGlobalLeaderboard = {
+                    leaderboardInitialTab = LeaderboardTab.ALL_TIME
+                    showLeaderboardDialog = true
+                },
                 onRestart = { viewModel.startNewGame() }
+            )
+        }
+
+        // Global & Daily Leaderboard Dialog
+        if (showLeaderboardDialog) {
+            DailyLeaderboardDialog(
+                entries = gameState.leaderboardEntries,
+                isLoading = gameState.isLeaderboardLoading,
+                errorMessage = gameState.leaderboardError,
+                dailyFormattedDate = gameState.dailyFormattedDate,
+                dailyPuzzleTitle = gameState.dailyPuzzleTitle,
+                currentUserId = gameState.currentUserId,
+                playerBestScore = if (gameState.gameMode == GameMode.DAILY_CHALLENGE) {
+                    maxOf(gameState.highScore, gameState.score)
+                } else {
+                    gameState.leaderboardEntries.firstOrNull { it.userId == gameState.currentUserId }?.score?.toInt() ?: 0
+                },
+                gameMode = gameState.gameMode,
+                onPlayDaily = { viewModel.switchGameMode(GameMode.DAILY_CHALLENGE) },
+                onDismiss = { showLeaderboardDialog = false },
+                globalEntries = gameState.globalLeaderboardEntries,
+                isGlobalLoading = gameState.isGlobalLeaderboardLoading,
+                globalErrorMessage = gameState.globalLeaderboardError,
+                playerTotalScore = gameState.totalAllTimeScore,
+                initialTab = leaderboardInitialTab
             )
         }
 
@@ -371,6 +501,20 @@ fun GameScreen(
                 totalLines = gameState.linesClearedSession,
                 gamesPlayed = 1,
                 onDismiss = { showStatsDialog = false }
+            )
+        }
+
+        // Settings Menu Dialog (Background Music, Sound Effects & Haptics)
+        if (showSettingsDialog) {
+            SettingsDialog(
+                isMusicEnabled = gameState.isMusicEnabled,
+                isSoundEnabled = gameState.isSoundEnabled,
+                isHapticsEnabled = gameState.isHapticsEnabled,
+                onToggleMusic = { viewModel.toggleMusic() },
+                onToggleSound = { viewModel.toggleSound() },
+                onToggleHaptics = { viewModel.toggleHaptics() },
+                onOpenTutorial = { viewModel.openTutorial() },
+                onDismiss = { showSettingsDialog = false }
             )
         }
 

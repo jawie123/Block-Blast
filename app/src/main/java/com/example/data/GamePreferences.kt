@@ -11,6 +11,10 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_HIGH_SCORE, 0)
         set(value) = prefs.edit().putInt(KEY_HIGH_SCORE, value).apply()
 
+    var timeAttackHighScore: Int
+        get() = prefs.getInt(KEY_TIME_ATTACK_HIGH_SCORE, 0)
+        set(value) = prefs.edit().putInt(KEY_TIME_ATTACK_HIGH_SCORE, value).apply()
+
     var highestCombo: Int
         get() = prefs.getInt(KEY_HIGHEST_COMBO, 0)
         set(value) = prefs.edit().putInt(KEY_HIGHEST_COMBO, value).apply()
@@ -22,6 +26,10 @@ class GamePreferences(context: Context) {
     var gamesPlayed: Int
         get() = prefs.getInt(KEY_GAMES_PLAYED, 0)
         set(value) = prefs.edit().putInt(KEY_GAMES_PLAYED, value).apply()
+
+    var isMusicEnabled: Boolean
+        get() = prefs.getBoolean(KEY_MUSIC_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_MUSIC_ENABLED, value).apply()
 
     var isSoundEnabled: Boolean
         get() = prefs.getBoolean(KEY_SOUND_ENABLED, true)
@@ -62,6 +70,17 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_HAMMER_COUNT, 3)
         set(value) = prefs.edit().putInt(KEY_HAMMER_COUNT, value).apply()
 
+    var totalAllTimeScore: Long
+        get() = prefs.getLong(KEY_TOTAL_ALL_TIME_SCORE, 0L)
+        set(value) = prefs.edit().putLong(KEY_TOTAL_ALL_TIME_SCORE, value.coerceAtLeast(0L)).apply()
+
+    fun addToTotalAllTimeScore(delta: Int): Long {
+        if (delta <= 0) return totalAllTimeScore
+        val updated = (totalAllTimeScore + delta.toLong()).coerceAtMost(1_000_000_000L)
+        totalAllTimeScore = updated
+        return updated
+    }
+
     fun getMissionProgress(missionId: String): Int {
         return prefs.getInt("mission_prog_$missionId", 0)
     }
@@ -93,6 +112,7 @@ class GamePreferences(context: Context) {
         private const val KEY_HIGHEST_COMBO = "key_highest_combo"
         private const val KEY_TOTAL_LINES = "key_total_lines"
         private const val KEY_GAMES_PLAYED = "key_games_played"
+        private const val KEY_MUSIC_ENABLED = "key_music_enabled"
         private const val KEY_SOUND_ENABLED = "key_sound_enabled"
         private const val KEY_HAPTICS_ENABLED = "key_haptics_enabled"
         private const val KEY_HAS_SEEN_TUTORIAL = "key_has_seen_tutorial"
@@ -100,5 +120,7 @@ class GamePreferences(context: Context) {
         private const val KEY_DAILY_STREAK = "key_daily_streak"
         private const val KEY_DAILY_HISTORY = "key_daily_history"
         private const val KEY_HAMMER_COUNT = "key_hammer_count"
+        private const val KEY_TOTAL_ALL_TIME_SCORE = "key_total_all_time_score"
+        private const val KEY_TIME_ATTACK_HIGH_SCORE = "key_time_attack_high_score"
     }
 }

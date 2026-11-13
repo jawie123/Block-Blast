@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.EmojiEvents
 import com.example.model.GameMode
+import com.example.model.GameOverReason
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ViewWeek
@@ -64,14 +65,18 @@ fun GameOverDialog(
     secondChanceAvailable: Boolean,
     canUndo: Boolean = false,
     gameMode: GameMode = GameMode.CLASSIC,
+    gameOverReason: GameOverReason = GameOverReason.NO_MOVES,
     dailyTargetScore: Int = 5000,
     dailyGlobalRecord: Int = 8540,
     hammerCount: Int = 0,
     onUndo: () -> Unit = {},
     onSecondChance: () -> Unit,
     onUseHammer: () -> Unit = {},
+    onShowLeaderboard: () -> Unit = {},
+    onShowGlobalLeaderboard: () -> Unit = onShowLeaderboard,
     onRestart: () -> Unit
 ) {
+    val isTimeUp = gameOverReason == GameOverReason.TIME_UP
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
@@ -104,7 +109,7 @@ fun GameOverDialog(
             ) {
                 // Header
                 Text(
-                    text = "NO MORE MOVES!",
+                    text = if (isTimeUp) "TIME'S UP!" else "NO MORE MOVES!",
                     style = MaterialTheme.typography.titleLarge,
                     color = Color(0xFFFF5252),
                     fontWeight = FontWeight.Black,
@@ -301,7 +306,11 @@ fun GameOverDialog(
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    text = "SECOND CHANCE (BLAST 3x3)",
+                                    text = when {
+                                        isTimeUp -> "SECOND CHANCE (+15s TIME)"
+                                        gameMode == GameMode.TIME_ATTACK -> "SECOND CHANCE (BLAST +15s)"
+                                        else -> "SECOND CHANCE (BLAST 3x3)"
+                                    },
                                     color = Color.White,
                                     fontWeight = FontWeight.Black,
                                     fontSize = 13.sp
@@ -314,7 +323,7 @@ fun GameOverDialog(
                 }
 
                 // Hammer Rescue Button (Smash single blocking block)
-                if (hammerCount > 0) {
+                if (hammerCount > 0 && !isTimeUp) {
                     Button(
                         onClick = onUseHammer,
                         modifier = Modifier
@@ -388,13 +397,59 @@ fun GameOverDialog(
                                 fontSize = 11.sp,
                                 color = Color.White
                             )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = onShowLeaderboard,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(38.dp)
+                                    .testTag("dialog_leaderboard_button"),
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, GoldAccent),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent)
+                            ) {
+                                Text(
+                                    text = "VIEW DAILY LEADERBOARD",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
+                } else {
+                    OutlinedButton(
+                        onClick = onShowGlobalLeaderboard,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("dialog_global_leaderboard_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, GoldAccent),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.EmojiEvents,
+                                contentDescription = null,
+                                tint = GoldAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "VIEW GLOBAL LEADERBOARD",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
 
                 // Undo Last Placement Button if move can be reverted
-                if (canUndo) {
+                if (canUndo && !isTimeUp) {
                     OutlinedButton(
                         onClick = onUndo,
                         modifier = Modifier
