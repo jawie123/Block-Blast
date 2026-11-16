@@ -216,11 +216,14 @@ test("Unauthenticated user: cannot read or write all-time global leaderboard", a
     unauthDb.collection("global_leaderboard").where("totalScore", ">=", 0).get()
   );
   await assertFails(
+    unauthDb.collection("global_leaderboard").where("bestScore", ">=", 0).get()
+  );
+  await assertFails(
     unauthDb.collection("global_leaderboard").doc(ALICE_UID).set(validGlobalLeaderboardPayload(ALICE_UID))
   );
 });
 
-test("Authenticated user: can create, monotonically increment, and query all-time global leaderboard", async () => {
+test("Authenticated user: can create, monotonically increment, and query global leaderboard by totalScore and bestScore", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const ref = aliceDb.collection("global_leaderboard").doc(ALICE_UID);
   await assertSucceeds(ref.set(validGlobalLeaderboardPayload(ALICE_UID, 5200)));
@@ -236,20 +239,33 @@ test("Authenticated user: can create, monotonically increment, and query all-tim
     })
   );
 
-  // Monotonic decrease is rejected
+  // Monotonic decrease on totalScore or bestScore is rejected
   await assertFails(
     ref.update({
       totalScore: 4000,
       updatedAt: serverTs(),
     })
   );
+  await assertFails(
+    ref.update({
+      bestScore: 1200,
+      updatedAt: serverTs(),
+    })
+  );
 
-  // Aligned query succeeds for another signed-in player
+  // Aligned totalScore and bestScore queries succeed for another signed-in player
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   await assertSucceeds(
     bobDb.collection("global_leaderboard")
       .where("totalScore", ">=", 0)
       .orderBy("totalScore", "desc")
+      .limit(50)
+      .get()
+  );
+  await assertSucceeds(
+    bobDb.collection("global_leaderboard")
+      .where("bestScore", ">=", 0)
+      .orderBy("bestScore", "desc")
       .limit(50)
       .get()
   );
@@ -268,5 +284,95 @@ test("Authenticated user: cannot spoof another user's global leaderboard doc or 
       ...validGlobalLeaderboardPayload(ALICE_UID),
       role: "admin",
     })
+  );
+});
+
+// --- DAILY LOGIN REWARD & STREAK SECURITY TESTS ---
+
+function validDailyLoginRewardPayload(uid, streak = 1, lastClaimDate = TEST_DATE) {
+  return {
+    userId: uid,
+    loginStreak: streak,
+    longestLoginStreak: streak,
+    lastClaimDate,
+    totalDaysClaimed: streak,
+    coinsBalance: 50,
+    totalCoinsEarned: 50,
+    totalHammersEarned: 0,
+    createdAt: serverTs(),
+    updatedAt: serverTs(),
+  };
+}
+
+test("Unauthenticated user: cannot read or write daily login reward profile", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  await assertFails(
+    unauthDb.collection(`users/${ALICE_UID}/rewards`).doc("daily_login").get()
+  );
+  await assertFails(
+    unauthDb.collection(`users/${ALICE_UID}/rewards`).doc("daily_login").set(validDailyLoginRewardPayload(ALICE_UID))
+  );
+});
+
+test("Authenticated user: can create, advance streak, spend coins, and read own daily login reward profile", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const docRef = aliceDb.collection(`users/${ALICE_UID}/rewards`).doc("daily_login");
+  await assertSucceeds(docRef.set(validDailyLoginRewardPayload(ALICE_UID, 1, "2026-11-15")));
+  await assertSucceeds(docRef.get());
+
+  // Advance streak to Day 2 (+1 hammer)
+  await assertSucceeds(
+    docRef.update({
+      loginStreak: 2,
+      longestLoginStreak: 2,
+      lastClaimDate: "2026-11-16",
+      totalDaysClaimed: 2,
+      coinsBalance: 150,
+      totalCoinsEarned: 150,
+      totalHammersEarned: 1,
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Spend 100 coins for a hammer (coinsBalance decreases, totalCoinsEarned unchanged)
+  await assertSucceeds(
+    docRef.update({
+      coinsBalance: 50,
+      updatedAt: serverTs(),
+    })
+  );
+});
+
+test("Authenticated user: cannot access another user's reward profile, use wrong doc id, inject ghost fields, or downgrade totals", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const docRef = aliceDb.collection(`users/${ALICE_UID}/rewards`).doc("daily_login");
+  await assertSucceeds(docRef.set(validDailyLoginRewardPayload(ALICE_UID, 3, "2026-11-16")));
+
+  // Downgrading totalDaysClaimed is rejected
+  await assertFails(
+    docRef.update({
+      totalDaysClaimed: 1,
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Wrong document id is rejected
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/rewards`).doc("vip_bonus").set(validDailyLoginRewardPayload(ALICE_UID))
+  );
+
+  // Ghost field is rejected
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/rewards`).doc("daily_login").set({
+      ...validDailyLoginRewardPayload(ALICE_UID),
+      unlimitedCoins: true,
+    })
+  );
+
+  // Cross-user read/write is rejected
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/rewards`).doc("daily_login").get());
+  await assertFails(
+    bobDb.collection(`users/${ALICE_UID}/rewards`).doc("daily_login").set(validDailyLoginRewardPayload(BOB_UID))
   );
 });

@@ -74,6 +74,7 @@ private val TierLabels = listOf("1x", "2x", "3x", "4x", "5x+")
 @Composable
 fun ComboStreakMeter(
     comboStreak: Int,
+    compact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val tierIndex = when {
@@ -151,11 +152,11 @@ fun ComboStreakMeter(
             .clip(RoundedCornerShape(10.dp))
             .background(BoardBackground)
             .border(1.dp, animatedBorderColor, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .padding(horizontal = 10.dp, vertical = if (compact) 3.dp else 5.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 4.dp)
         ) {
             // Header: Status title and Active Multiplier Badge in single compact row
             Row(
@@ -277,28 +278,30 @@ fun ComboStreakMeter(
                 }
             }
 
-            // Labels below segments showing the 5 multiplier levels
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                for (i in 0 until 5) {
-                    val isReached = comboStreak > i
-                    val isCurrentPeak = comboStreak == i + 1 || (i == 4 && comboStreak >= 5)
+            if (!compact) {
+                // Labels below segments showing the 5 multiplier levels
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for (i in 0 until 5) {
+                        val isReached = comboStreak > i
+                        val isCurrentPeak = comboStreak == i + 1 || (i == 4 && comboStreak >= 5)
 
-                    Text(
-                        text = TierLabels[i],
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Center,
-                        fontSize = 8.sp,
-                        fontWeight = if (isCurrentPeak) FontWeight.Black else FontWeight.Bold,
-                        color = when {
-                            isCurrentPeak -> TierPrimaryColors[i]
-                            isReached -> TierPrimaryColors[i].copy(alpha = 0.85f)
-                            else -> Color(0xFF5E6B85)
-                        }
-                    )
+                        Text(
+                            text = TierLabels[i],
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            fontSize = 8.sp,
+                            fontWeight = if (isCurrentPeak) FontWeight.Black else FontWeight.Bold,
+                            color = when {
+                                isCurrentPeak -> TierPrimaryColors[i]
+                                isReached -> TierPrimaryColors[i].copy(alpha = 0.85f)
+                                else -> Color(0xFF5E6B85)
+                            }
+                        )
+                    }
                 }
             }
         }

@@ -50,3 +50,25 @@ data class SavedGameSessionData(
     val clientUpdatedAt: Long,
     val timeRemainingMs: Long = 60_000L
 )
+
+@IgnoreExtraProperties
+data class DailyLoginRewardProfile(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val loginStreak: Long = 0L,
+    val longestLoginStreak: Long = 0L,
+    val lastClaimDate: String = "",
+    val totalDaysClaimed: Long = 0L,
+    val coinsBalance: Long = 0L,
+    val totalCoinsEarned: Long = 0L,
+    val totalHammersEarned: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+data class DailyLoginClaimResult(
+    val claimed: Boolean,
+    val grantedTier: DailyLoginRewardTier?,
+    val profile: DailyLoginRewardProfile
+)
+

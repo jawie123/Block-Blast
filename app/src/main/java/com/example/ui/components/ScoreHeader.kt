@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.BoardBackground
@@ -57,14 +58,19 @@ fun ScoreHeader(
     isSoundEnabled: Boolean = true,
     isHapticsEnabled: Boolean = true,
     canUndo: Boolean = false,
+    isGuestMode: Boolean = false,
     gameMode: GameMode = GameMode.CLASSIC,
     dailyGlobalRecord: Int = 8540,
     dailyTargetScore: Int = 5000,
     dailyStreak: Int = 0,
+    isDailyCompletedToday: Boolean = false,
     dailyPuzzleTitle: String = "",
     hammerCount: Int = 3,
     isHammerActive: Boolean = false,
     unclaimedMissions: Int = 0,
+    coinsBalance: Int = 0,
+    loginStreak: Int = 0,
+    canClaimDailyReward: Boolean = false,
     difficultyLevel: Int = 1,
     difficultyTitle: String = "STARTER",
     difficultyProgress: Float = 0f,
@@ -83,8 +89,10 @@ fun ScoreHeader(
     onUndo: () -> Unit = {},
     onToggleHammer: () -> Unit = {},
     onShowMissions: () -> Unit = {},
+    onShowDailyRewards: () -> Unit = {},
     onSwitchMode: (GameMode) -> Unit = {},
     onRestart: () -> Unit,
+    compactMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -95,13 +103,14 @@ fun ScoreHeader(
         // Top Toolbar: Brand & Quick Controls
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // App Title / Brand
             Row(
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -123,11 +132,33 @@ fun ScoreHeader(
                 }
                 Text(
                     text = "BLOCK BLAST",
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     color = Color.White,
                     fontWeight = FontWeight.Black,
-                    letterSpacing = 0.6.sp
+                    letterSpacing = 0.4.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
+                if (isGuestMode) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color(0x2600E5FF))
+                            .border(0.8.dp, Color(0xFF00E5FF).copy(alpha = 0.65f), RoundedCornerShape(5.dp))
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                            .testTag("guest_mode_badge")
+                    ) {
+                        Text(
+                            text = "GUEST",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF00E5FF),
+                            letterSpacing = 0.4.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
 
             // Controls Toolbar (Compact 30dp buttons)
@@ -237,15 +268,15 @@ fun ScoreHeader(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Logout,
-                        contentDescription = "Sign Out",
-                        tint = Color(0xFFFF8A80),
+                        contentDescription = if (isGuestMode) "Sign In / Switch Account" else "Sign Out",
+                        tint = if (isGuestMode) Color(0xFF00E5FF) else Color(0xFFFF8A80),
                         modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(if (compactMode) 2.dp else 4.dp))
 
         // Mode Switcher: Classic vs Time Attack vs Daily Challenge
         Row(
@@ -504,10 +535,11 @@ fun ScoreHeader(
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -523,30 +555,51 @@ fun ScoreHeader(
                             } else {
                                 "TOP: $dailyGlobalRecord"
                             },
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            color = GoldAccent
+                            color = GoldAccent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        if (dailyStreak > 0) {
+                            Text(
+                                text = "🔥${dailyStreak}d",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFFF9800),
+                                maxLines = 1,
+                                modifier = Modifier.testTag("daily_streak_badge")
+                            )
+                        }
+
+                        Text(
+                            text = if (isDailyCompletedToday) "✅ SOLVED" else "TARGET: $dailyTargetScore",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isDailyCompletedToday) Color(0xFF00E676) else Color(0xFF00E5FF),
+                            maxLines = 1,
+                            modifier = Modifier.testTag("daily_target_status")
                         )
                     }
 
                     Text(
-                        text = "TARGET: $dailyTargetScore",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF00E5FF)
-                    )
-
-                    Text(
                         text = "🏆 RANKS",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Black,
-                        color = Color(0xFFFFB74D)
+                        color = Color(0xFFFFB74D),
+                        maxLines = 1
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(if (compactMode) 2.dp else 4.dp))
 
         // Scores Banner: Score, Combo & High Score in a clean, tight row
         Row(
@@ -565,18 +618,18 @@ fun ScoreHeader(
                 )
                 Text(
                     text = "$score",
-                    fontSize = 30.sp,
-                    lineHeight = 32.sp,
+                    fontSize = if (compactMode) 24.sp else 30.sp,
+                    lineHeight = if (compactMode) 26.sp else 32.sp,
                     color = Color.White,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.testTag("current_score_text")
                 )
             }
 
-            // Power-ups & Missions Quick Bar
+            // Power-ups, Daily Login Gift & Missions Quick Bar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 // Hammer Power-up Button
                 Box(
@@ -599,23 +652,70 @@ fun ScoreHeader(
                             shape = RoundedCornerShape(10.dp)
                         )
                         .clickable { onToggleHammer() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .padding(horizontal = 6.dp, vertical = 5.dp)
                         .testTag("hammer_powerup_button"),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Text(
                             text = "🔨",
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                         Text(
-                            text = if (isHammerActive) "ACTIVE" else "$hammerCount",
-                            fontSize = 11.sp,
+                            text = if (isHammerActive) "ON" else "$hammerCount",
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Black,
                             color = if (isHammerActive) Color(0xFF0F111E) else if (hammerCount > 0) Color(0xFFFFD54F) else Color.Gray
+                        )
+                    }
+                }
+
+                // Daily Login Rewards Button (Gift + Coins/Streak indicator)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                if (canClaimDailyReward) {
+                                    listOf(Color(0xFF33260B), Color(0xFF241B10))
+                                } else {
+                                    listOf(Color(0xFF1E2235), Color(0xFF161928))
+                                }
+                            )
+                        )
+                        .border(
+                            width = if (canClaimDailyReward) 1.5.dp else 1.dp,
+                            color = if (canClaimDailyReward) GoldAccent else BoardBorder,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onShowDailyRewards() }
+                        .padding(horizontal = 6.dp, vertical = 5.dp)
+                        .testTag("daily_login_reward_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "🎁",
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = when {
+                                canClaimDailyReward -> "CLAIM"
+                                coinsBalance > 0 -> "🪙$coinsBalance"
+                                loginStreak > 0 -> "${loginStreak}d"
+                                else -> "GIFT"
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (canClaimDailyReward) GoldAccent else Color(0xFFFFE082),
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -635,13 +735,13 @@ fun ScoreHeader(
                             shape = RoundedCornerShape(10.dp)
                         )
                         .clickable { onShowMissions() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .padding(horizontal = 6.dp, vertical = 5.dp)
                         .testTag("daily_missions_button"),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Text(
                             text = "🎯",
@@ -649,9 +749,11 @@ fun ScoreHeader(
                         )
                         Text(
                             text = "GOALS",
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            maxLines = 1,
+                            softWrap = false
                         )
                         if (unclaimedMissions > 0) {
                             Box(
@@ -813,11 +915,12 @@ fun ScoreHeader(
             )
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(if (compactMode) 2.dp else 4.dp))
 
         // Visual Combo Streak Meter displaying multiplier and consecutive clear progress
         ComboStreakMeter(
             comboStreak = comboStreak,
+            compact = compactMode,
             modifier = Modifier.fillMaxWidth()
         )
     }

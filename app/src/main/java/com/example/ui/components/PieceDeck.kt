@@ -3,8 +3,8 @@ package com.example.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,9 +29,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -39,9 +45,11 @@ import androidx.compose.ui.unit.sp
 import com.example.model.BlockShape
 import com.example.ui.theme.BoardBackground
 import com.example.ui.theme.BoardBorder
+import kotlinx.coroutines.CancellationException
 
 /**
  * PieceSlot composable to display an individual active random shape in the piece pool.
+ * Supports immediate drag-and-drop pickup directly onto the board as well as tap-to-select.
  */
 @Composable
 fun PieceSlot(
@@ -54,21 +62,93 @@ fun PieceSlot(
     onDragStart: (index: Int, touchPosRoot: Offset) -> Unit,
     onDragMove: (delta: Offset) -> Unit,
     onDragEnd: () -> Unit,
+    compactMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val dragThresholdPx = with(density) { 4.dp.toPx() }
     var slotRootTopLeft by remember { mutableStateOf(Offset.Zero) }
+
+    val currentShape by rememberUpdatedState(shape)
+    val currentCanFit by rememberUpdatedState(canFit)
+    val currentIsSelected by rememberUpdatedState(isSelected)
+    val currentOnSelectPiece by rememberUpdatedState(onSelectPiece)
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDragMove by rememberUpdatedState(onDragMove)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
 
     Box(
         modifier = modifier
-            .height(96.dp)
+            .height(if (compactMode) 68.dp else 96.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(BoardBackground)
             .border(
-                width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) Color(0xFF00E5FF) else BoardBorder,
+                width = if (isSelected || isDragging) 2.dp else 1.dp,
+                color = when {
+                    isDragging -> Color(0xFF00E5FF).copy(alpha = 0.6f)
+                    isSelected -> Color(0xFF00E5FF)
+                    else -> BoardBorder
+                },
                 shape = RoundedCornerShape(12.dp)
             )
+            .onGloballyPositioned { coordinates ->
+                slotRootTopLeft = coordinates.boundsInRoot().topLeft
+            }
+            .pointerInput(index) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val activeShape = currentShape
+                    val fits = currentCanFit
+                    if (activeShape == null || !fits) {
+                        return@awaitEachGesture
+                    }
+
+                    var dragStarted = false
+                    var accumulatedOffset = Offset.Zero
+
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: event.changes.firstOrNull()
+
+                            if (change == null || !change.pressed || change.changedToUpIgnoreConsumed()) {
+                                if (dragStarted) {
+                                    currentOnDragEnd()
+                                } else {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    if (currentIsSelected) {
+                                        currentOnSelectPiece(null)
+                                    } else {
+                                        currentOnSelectPiece(index)
+                                    }
+                                }
+                                break
+                            }
+
+                            val delta = change.positionChange()
+                            if (delta != Offset.Zero) {
+                                accumulatedOffset += delta
+                                if (!dragStarted && accumulatedOffset.getDistance() >= dragThresholdPx) {
+                                    dragStarted = true
+                                    change.consume()
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    currentOnDragStart(index, slotRootTopLeft + change.position)
+                                } else if (dragStarted) {
+                                    change.consume()
+                                    currentOnDragMove(delta)
+                                }
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        if (dragStarted) {
+                            currentOnDragEnd()
+                        }
+                        throw e
+                    }
+                }
+            }
             .testTag("piece_slot_$index"),
         contentAlignment = Alignment.Center
     ) {
@@ -81,38 +161,10 @@ fun PieceSlot(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .scale(scale)
-                    .onGloballyPositioned { coordinates ->
-                        val bounds = coordinates.boundsInRoot()
-                        slotRootTopLeft = bounds.topLeft
-                    }
-                    .pointerInput(shape.instanceId) {
-                        detectDragGestures(
-                            onDragStart = { localOffset ->
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                onDragStart(index, slotRootTopLeft + localOffset)
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                onDragMove(dragAmount)
-                            },
-                            onDragEnd = { onDragEnd() },
-                            onDragCancel = { onDragEnd() }
-                        )
-                    }
-                    .clickable {
-                        if (canFit && !isDragging) {
-                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                            if (isSelected) {
-                                onSelectPiece(null)
-                            } else {
-                                onSelectPiece(index)
-                            }
-                        }
-                    },
+                    .scale(scale),
                 contentAlignment = Alignment.Center
             ) {
-                // When dragging, keep this Box mounted to sustain pointerInput events while hiding the static piece
+                // Keep mounted during drag to sustain pointerInput events while hiding static piece
                 Box(
                     modifier = Modifier.alpha(
                         if (isDragging) 0f else if (canFit) 1.0f else 0.38f
@@ -120,7 +172,7 @@ fun PieceSlot(
                 ) {
                     ShapeRenderer(
                         shape = shape,
-                        cellUnitDp = 18.dp
+                        cellUnitDp = if (compactMode) 13.dp else 18.dp
                     )
                 }
             }
@@ -159,13 +211,14 @@ fun PieceDeck(
     onDragStart: (index: Int, touchPosRoot: Offset) -> Unit,
     onDragMove: (delta: Offset) -> Unit,
     onDragEnd: () -> Unit,
+    compactMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(106.dp)
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .height(if (compactMode) 76.dp else 106.dp)
+            .padding(horizontal = 12.dp, vertical = if (compactMode) 2.dp else 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -180,6 +233,7 @@ fun PieceDeck(
                 onDragStart = onDragStart,
                 onDragMove = onDragMove,
                 onDragEnd = onDragEnd,
+                compactMode = compactMode,
                 modifier = Modifier.weight(1f)
             )
         }

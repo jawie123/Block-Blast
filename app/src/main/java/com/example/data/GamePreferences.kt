@@ -43,6 +43,10 @@ class GamePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_HAS_SEEN_TUTORIAL, false)
         set(value) = prefs.edit().putBoolean(KEY_HAS_SEEN_TUTORIAL, value).apply()
 
+    var isGuestSession: Boolean
+        get() = prefs.getBoolean(KEY_IS_GUEST_SESSION, false)
+        set(value) = prefs.edit().putBoolean(KEY_IS_GUEST_SESSION, value).apply()
+
     var dailyLastPlayedDate: String
         get() = prefs.getString(KEY_DAILY_LAST_DATE, "") ?: ""
         set(value) = prefs.edit().putString(KEY_DAILY_LAST_DATE, value).apply()
@@ -107,6 +111,84 @@ class GamePreferences(context: Context) {
         }
     }
 
+    var dailyChallengesCompleted: Int
+        get() = prefs.getInt(KEY_DAILY_CHALLENGES_COMPLETED, 0)
+        set(value) = prefs.edit().putInt(KEY_DAILY_CHALLENGES_COMPLETED, value.coerceAtLeast(0)).apply()
+
+    fun isDailyDateCompleted(date: String): Boolean {
+        if (date.isBlank()) return false
+        return prefs.getBoolean("key_daily_completed_$date", false)
+    }
+
+    fun markDailyDateCompleted(date: String): Boolean {
+        if (date.isBlank() || isDailyDateCompleted(date)) return false
+        prefs.edit().putBoolean("key_daily_completed_$date", true).apply()
+        dailyChallengesCompleted = dailyChallengesCompleted + 1
+        return true
+    }
+
+    /**
+     * Updates the player's Daily Challenge streak when playing on [todayDate].
+     * Increments streak when [dailyLastPlayedDate] equals [yesterdayDate], keeps it if already
+     * recorded today, or resets to 1 when a day was missed.
+     */
+    fun recordDailyParticipation(todayDate: String, yesterdayDate: String): Int {
+        if (todayDate.isBlank()) return dailyStreak
+        val lastDate = dailyLastPlayedDate
+        val updatedStreak = when {
+            lastDate == todayDate -> maxOf(1, dailyStreak)
+            lastDate == yesterdayDate -> dailyStreak + 1
+            else -> 1
+        }
+        dailyLastPlayedDate = todayDate
+        dailyStreak = updatedStreak
+        return updatedStreak
+    }
+
+    fun isAchievementUnlocked(achievementId: String): Boolean {
+        return prefs.getBoolean("ach_unlocked_$achievementId", false)
+    }
+
+    fun setAchievementUnlocked(achievementId: String, unlocked: Boolean) {
+        prefs.edit().putBoolean("ach_unlocked_$achievementId", unlocked).apply()
+    }
+
+    fun getAchievementProgress(achievementId: String): Int {
+        return prefs.getInt("ach_prog_$achievementId", 0)
+    }
+
+    fun setAchievementProgress(achievementId: String, progress: Int) {
+        prefs.edit().putInt("ach_prog_$achievementId", progress.coerceAtLeast(0)).apply()
+    }
+
+    var coinsBalance: Int
+        get() = prefs.getInt(KEY_COINS_BALANCE, 0)
+        set(value) = prefs.edit().putInt(KEY_COINS_BALANCE, value.coerceAtLeast(0)).apply()
+
+    var loginStreak: Int
+        get() = prefs.getInt(KEY_LOGIN_STREAK, 0)
+        set(value) = prefs.edit().putInt(KEY_LOGIN_STREAK, value.coerceAtLeast(0)).apply()
+
+    var longestLoginStreak: Int
+        get() = prefs.getInt(KEY_LONGEST_LOGIN_STREAK, 0)
+        set(value) = prefs.edit().putInt(KEY_LONGEST_LOGIN_STREAK, value.coerceAtLeast(0)).apply()
+
+    var lastLoginClaimDate: String
+        get() = prefs.getString(KEY_LAST_LOGIN_CLAIM_DATE, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LAST_LOGIN_CLAIM_DATE, value).apply()
+
+    var totalLoginDaysClaimed: Int
+        get() = prefs.getInt(KEY_TOTAL_LOGIN_DAYS_CLAIMED, 0)
+        set(value) = prefs.edit().putInt(KEY_TOTAL_LOGIN_DAYS_CLAIMED, value.coerceAtLeast(0)).apply()
+
+    var totalCoinsEarned: Int
+        get() = prefs.getInt(KEY_TOTAL_COINS_EARNED, 0)
+        set(value) = prefs.edit().putInt(KEY_TOTAL_COINS_EARNED, value.coerceAtLeast(0)).apply()
+
+    var totalLoginHammersEarned: Int
+        get() = prefs.getInt(KEY_TOTAL_LOGIN_HAMMERS_EARNED, 0)
+        set(value) = prefs.edit().putInt(KEY_TOTAL_LOGIN_HAMMERS_EARNED, value.coerceAtLeast(0)).apply()
+
     companion object {
         private const val KEY_HIGH_SCORE = "key_high_score"
         private const val KEY_HIGHEST_COMBO = "key_highest_combo"
@@ -122,5 +204,14 @@ class GamePreferences(context: Context) {
         private const val KEY_HAMMER_COUNT = "key_hammer_count"
         private const val KEY_TOTAL_ALL_TIME_SCORE = "key_total_all_time_score"
         private const val KEY_TIME_ATTACK_HIGH_SCORE = "key_time_attack_high_score"
+        private const val KEY_DAILY_CHALLENGES_COMPLETED = "key_daily_challenges_completed"
+        private const val KEY_IS_GUEST_SESSION = "key_is_guest_session"
+        private const val KEY_COINS_BALANCE = "key_coins_balance"
+        private const val KEY_LOGIN_STREAK = "key_login_streak"
+        private const val KEY_LONGEST_LOGIN_STREAK = "key_longest_login_streak"
+        private const val KEY_LAST_LOGIN_CLAIM_DATE = "key_last_login_claim_date"
+        private const val KEY_TOTAL_LOGIN_DAYS_CLAIMED = "key_total_login_days_claimed"
+        private const val KEY_TOTAL_COINS_EARNED = "key_total_coins_earned"
+        private const val KEY_TOTAL_LOGIN_HAMMERS_EARNED = "key_total_login_hammers_earned"
     }
 }

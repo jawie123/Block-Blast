@@ -66,6 +66,7 @@ import java.text.NumberFormat
 import java.util.Locale
 
 enum class LeaderboardTab {
+    HIGH_SCORES,
     ALL_TIME,
     DAILY
 }
@@ -86,7 +87,13 @@ fun DailyLeaderboardDialog(
     isGlobalLoading: Boolean = false,
     globalErrorMessage: String? = null,
     playerTotalScore: Long = 0L,
-    initialTab: LeaderboardTab = LeaderboardTab.ALL_TIME
+    highScoreEntries: List<GlobalLeaderboardEntry> = emptyList(),
+    isHighScoreLoading: Boolean = false,
+    highScoreErrorMessage: String? = null,
+    playerOverallBestScore: Int = 0,
+    initialTab: LeaderboardTab = LeaderboardTab.HIGH_SCORES,
+    isGuestMode: Boolean = false,
+    onSignInWithGoogle: () -> Unit = {}
 ) {
     var selectedTab by remember(initialTab) { mutableStateOf(initialTab) }
     val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
@@ -118,6 +125,8 @@ fun DailyLeaderboardDialog(
                     .padding(18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val isGlobalTab = selectedTab != LeaderboardTab.DAILY
+
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -133,12 +142,14 @@ fun DailyLeaderboardDialog(
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (selectedTab == LeaderboardTab.ALL_TIME) {
-                                        Brush.linearGradient(
+                                    when (selectedTab) {
+                                        LeaderboardTab.HIGH_SCORES -> Brush.linearGradient(
+                                            listOf(Color(0xFF00E5FF), Color(0xFF00E676))
+                                        )
+                                        LeaderboardTab.ALL_TIME -> Brush.linearGradient(
                                             listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF))
                                         )
-                                    } else {
-                                        Brush.linearGradient(
+                                        LeaderboardTab.DAILY -> Brush.linearGradient(
                                             listOf(Color(0xFFFFD600), Color(0xFFFF9800))
                                         )
                                     }
@@ -146,7 +157,7 @@ fun DailyLeaderboardDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (selectedTab == LeaderboardTab.ALL_TIME) {
+                                imageVector = if (isGlobalTab) {
                                     Icons.Default.Public
                                 } else {
                                     Icons.Default.EmojiEvents
@@ -162,7 +173,7 @@ fun DailyLeaderboardDialog(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = if (selectedTab == LeaderboardTab.ALL_TIME) {
+                                    text = if (isGlobalTab) {
                                         "GLOBAL LEADERBOARD"
                                     } else {
                                         "DAILY LEADERBOARD"
@@ -200,10 +211,10 @@ fun DailyLeaderboardDialog(
                                 }
                             }
                             Text(
-                                text = if (selectedTab == LeaderboardTab.ALL_TIME) {
-                                    "All-Time Cumulative Total Score"
-                                } else {
-                                    buildString {
+                                text = when (selectedTab) {
+                                    LeaderboardTab.HIGH_SCORES -> "Compare Single-Game High Scores"
+                                    LeaderboardTab.ALL_TIME -> "All-Time Cumulative Total Score"
+                                    LeaderboardTab.DAILY -> buildString {
                                         append(dailyFormattedDate.ifEmpty { "Today" })
                                         if (dailyPuzzleTitle.isNotBlank()) {
                                             append(" • ")
@@ -212,10 +223,10 @@ fun DailyLeaderboardDialog(
                                     }
                                 },
                                 fontSize = 11.sp,
-                                color = if (selectedTab == LeaderboardTab.ALL_TIME) {
-                                    Color(0xFF00E5FF)
-                                } else {
-                                    Color(0xFFFFB74D)
+                                color = when (selectedTab) {
+                                    LeaderboardTab.HIGH_SCORES -> Color(0xFF00E676)
+                                    LeaderboardTab.ALL_TIME -> Color(0xFF00E5FF)
+                                    LeaderboardTab.DAILY -> Color(0xFFFFB74D)
                                 },
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -239,7 +250,7 @@ fun DailyLeaderboardDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Tab Switcher: ALL-TIME vs DAILY
+                // Tab Switcher: HIGH SCORES vs ALL-TIME vs DAILY
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -249,6 +260,33 @@ fun DailyLeaderboardDialog(
                         .padding(3.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    val isHighScores = selectedTab == LeaderboardTab.HIGH_SCORES
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isHighScores) {
+                                    Brush.horizontalGradient(listOf(Color(0xFF00E5FF), Color(0xFF00E676)))
+                                } else {
+                                    Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                                }
+                            )
+                            .clickable { selectedTab = LeaderboardTab.HIGH_SCORES }
+                            .testTag("leaderboard_tab_high_scores"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "HIGH SCORES",
+                            fontSize = 10.sp,
+                            fontWeight = if (isHighScores) FontWeight.Black else FontWeight.Bold,
+                            color = if (isHighScores) Color(0xFF0F111E) else Color(0xFF8E9BB0),
+                            maxLines = 1,
+                            letterSpacing = 0.3.sp
+                        )
+                    }
+
                     val isAllTime = selectedTab == LeaderboardTab.ALL_TIME
                     Box(
                         modifier = Modifier
@@ -268,10 +306,11 @@ fun DailyLeaderboardDialog(
                     ) {
                         Text(
                             text = "ALL-TIME",
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             fontWeight = if (isAllTime) FontWeight.Black else FontWeight.Bold,
                             color = if (isAllTime) Color.White else Color(0xFF8E9BB0),
-                            letterSpacing = 0.5.sp
+                            maxLines = 1,
+                            letterSpacing = 0.3.sp
                         )
                     }
 
@@ -294,10 +333,11 @@ fun DailyLeaderboardDialog(
                     ) {
                         Text(
                             text = "DAILY",
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             fontWeight = if (isDaily) FontWeight.Black else FontWeight.Bold,
                             color = if (isDaily) Color(0xFF0F111E) else Color(0xFF8E9BB0),
-                            letterSpacing = 0.5.sp
+                            maxLines = 1,
+                            letterSpacing = 0.3.sp
                         )
                     }
                 }
@@ -305,16 +345,22 @@ fun DailyLeaderboardDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Player Summary Bar
+                val displayBestHighScore = maxOf(
+                    playerOverallBestScore,
+                    highScoreEntries.firstOrNull { it.userId == currentUserId }?.bestScore?.toInt() ?: 0
+                )
                 val displayTotalScore = maxOf(
                     playerTotalScore,
                     globalEntries.firstOrNull { it.userId == currentUserId }?.totalScore ?: 0L
                 )
-                val myRank = if (selectedTab == LeaderboardTab.ALL_TIME) {
-                    globalEntries.indexOfFirst { it.userId == currentUserId }.let {
+                val myRank = when (selectedTab) {
+                    LeaderboardTab.HIGH_SCORES -> highScoreEntries.indexOfFirst { it.userId == currentUserId }.let {
                         if (it >= 0) "#${it + 1}" else "--"
                     }
-                } else {
-                    entries.indexOfFirst { it.userId == currentUserId }.let {
+                    LeaderboardTab.ALL_TIME -> globalEntries.indexOfFirst { it.userId == currentUserId }.let {
+                        if (it >= 0) "#${it + 1}" else "--"
+                    }
+                    LeaderboardTab.DAILY -> entries.indexOfFirst { it.userId == currentUserId }.let {
                         if (it >= 0) "#${it + 1}" else "--"
                     }
                 }
@@ -331,20 +377,20 @@ fun DailyLeaderboardDialog(
                 ) {
                     Column {
                         Text(
-                            text = if (selectedTab == LeaderboardTab.ALL_TIME) {
-                                "YOUR TOTAL SCORE"
-                            } else {
-                                "YOUR BEST TODAY"
+                            text = when (selectedTab) {
+                                LeaderboardTab.HIGH_SCORES -> "YOUR HIGH SCORE"
+                                LeaderboardTab.ALL_TIME -> "YOUR TOTAL SCORE"
+                                LeaderboardTab.DAILY -> "YOUR BEST TODAY"
                             },
                             fontSize = 9.sp,
                             color = Color(0xFF8E9BB0),
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (selectedTab == LeaderboardTab.ALL_TIME) {
-                                numberFormat.format(displayTotalScore)
-                            } else {
-                                numberFormat.format(playerBestScore)
+                            text = when (selectedTab) {
+                                LeaderboardTab.HIGH_SCORES -> numberFormat.format(displayBestHighScore)
+                                LeaderboardTab.ALL_TIME -> numberFormat.format(displayTotalScore)
+                                LeaderboardTab.DAILY -> numberFormat.format(playerBestScore)
                             },
                             fontSize = 18.sp,
                             color = Color(0xFF00E5FF),
@@ -354,11 +400,7 @@ fun DailyLeaderboardDialog(
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = if (selectedTab == LeaderboardTab.ALL_TIME) {
-                                "GLOBAL RANK"
-                            } else {
-                                "WORLD RANK"
-                            },
+                            text = if (isGlobalTab) "GLOBAL RANK" else "WORLD RANK",
                             fontSize = 9.sp,
                             color = Color(0xFF8E9BB0),
                             fontWeight = FontWeight.Bold
@@ -372,93 +414,179 @@ fun DailyLeaderboardDialog(
                     }
                 }
 
+                // Direct Score Comparison Banner on High Scores Tab
+                if (selectedTab == LeaderboardTab.HIGH_SCORES && highScoreEntries.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HighScoreComparisonBanner(
+                        entries = highScoreEntries,
+                        currentUserId = currentUserId,
+                        playerBestScore = displayBestHighScore,
+                        numberFormat = numberFormat
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Entries List
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 160.dp, max = 300.dp),
+                        .heightIn(min = 120.dp, max = 300.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (selectedTab == LeaderboardTab.ALL_TIME) {
-                        when {
-                            isGlobalLoading && globalEntries.isEmpty() -> {
-                                LoadingLeaderboardState("Syncing global rankings...")
-                            }
+                    when (selectedTab) {
+                        LeaderboardTab.HIGH_SCORES -> {
+                            when {
+                                isHighScoreLoading && highScoreEntries.isEmpty() -> {
+                                    LoadingLeaderboardState("Syncing global high scores...")
+                                }
 
-                            globalErrorMessage != null && globalEntries.isEmpty() -> {
-                                ErrorLeaderboardState(globalErrorMessage)
-                            }
+                                highScoreErrorMessage != null && highScoreEntries.isEmpty() -> {
+                                    ErrorLeaderboardState(highScoreErrorMessage)
+                                }
 
-                            globalEntries.isEmpty() -> {
-                                Text(
-                                    text = "No global scores recorded yet.\nPlace blocks in any mode to climb the all-time ranks!",
-                                    color = Color(0xFF8E9BB0),
-                                    fontSize = 13.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(16.dp)
-                                )
-                            }
+                                isGuestMode && highScoreEntries.isEmpty() -> {
+                                    GuestLeaderboardPrompt(
+                                        onSignInWithGoogle = {
+                                            onDismiss()
+                                            onSignInWithGoogle()
+                                        }
+                                    )
+                                }
 
-                            else -> {
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("global_leaderboard_list"),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    itemsIndexed(
-                                        items = globalEntries,
-                                        key = { _, item -> item.userId.ifEmpty { item.id } }
-                                    ) { index, entry ->
-                                        GlobalLeaderboardRow(
-                                            rank = index + 1,
-                                            entry = entry,
-                                            isCurrentUser = entry.userId == currentUserId,
-                                            numberFormat = numberFormat
-                                        )
+                                highScoreEntries.isEmpty() -> {
+                                    Text(
+                                        text = "No global high scores posted yet.\nSet a high score to challenge players worldwide!",
+                                        color = Color(0xFF8E9BB0),
+                                        fontSize = 13.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+
+                                else -> {
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("high_score_leaderboard_list"),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        itemsIndexed(
+                                            items = highScoreEntries,
+                                            key = { _, item -> item.userId.ifEmpty { item.id } }
+                                        ) { index, entry ->
+                                            HighScoreLeaderboardRow(
+                                                rank = index + 1,
+                                                entry = entry,
+                                                isCurrentUser = entry.userId == currentUserId,
+                                                playerReferenceBestScore = displayBestHighScore,
+                                                numberFormat = numberFormat
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                    } else {
-                        when {
-                            isLoading && entries.isEmpty() -> {
-                                LoadingLeaderboardState("Loading daily rankings...")
-                            }
 
-                            errorMessage != null && entries.isEmpty() -> {
-                                ErrorLeaderboardState(errorMessage)
-                            }
+                        LeaderboardTab.ALL_TIME -> {
+                            when {
+                                isGlobalLoading && globalEntries.isEmpty() -> {
+                                    LoadingLeaderboardState("Syncing global rankings...")
+                                }
 
-                            entries.isEmpty() -> {
-                                Text(
-                                    text = "No daily scores posted yet.\nPlay today's 8×8 puzzle to claim #1!",
-                                    color = Color(0xFF8E9BB0),
-                                    fontSize = 13.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(16.dp)
-                                )
-                            }
+                                globalErrorMessage != null && globalEntries.isEmpty() -> {
+                                    ErrorLeaderboardState(globalErrorMessage)
+                                }
 
-                            else -> {
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("daily_leaderboard_list"),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    itemsIndexed(
-                                        items = entries,
-                                        key = { _, item -> item.userId.ifEmpty { item.id } }
-                                    ) { index, entry ->
-                                        LeaderboardRow(
-                                            rank = index + 1,
-                                            entry = entry,
-                                            isCurrentUser = entry.userId == currentUserId,
-                                            numberFormat = numberFormat
-                                        )
+                                isGuestMode && globalEntries.isEmpty() -> {
+                                    GuestLeaderboardPrompt(
+                                        onSignInWithGoogle = {
+                                            onDismiss()
+                                            onSignInWithGoogle()
+                                        }
+                                    )
+                                }
+
+                                globalEntries.isEmpty() -> {
+                                    Text(
+                                        text = "No global scores recorded yet.\nPlace blocks in any mode to climb the all-time ranks!",
+                                        color = Color(0xFF8E9BB0),
+                                        fontSize = 13.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+
+                                else -> {
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("global_leaderboard_list"),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        itemsIndexed(
+                                            items = globalEntries,
+                                            key = { _, item -> item.userId.ifEmpty { item.id } }
+                                        ) { index, entry ->
+                                            GlobalLeaderboardRow(
+                                                rank = index + 1,
+                                                entry = entry,
+                                                isCurrentUser = entry.userId == currentUserId,
+                                                numberFormat = numberFormat
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        LeaderboardTab.DAILY -> {
+                            when {
+                                isLoading && entries.isEmpty() -> {
+                                    LoadingLeaderboardState("Loading daily rankings...")
+                                }
+
+                                errorMessage != null && entries.isEmpty() -> {
+                                    ErrorLeaderboardState(errorMessage)
+                                }
+
+                                isGuestMode && entries.isEmpty() -> {
+                                    GuestLeaderboardPrompt(
+                                        onSignInWithGoogle = {
+                                            onDismiss()
+                                            onSignInWithGoogle()
+                                        }
+                                    )
+                                }
+
+                                entries.isEmpty() -> {
+                                    Text(
+                                        text = "No daily scores posted yet.\nPlay today's 8×8 puzzle to claim #1!",
+                                        color = Color(0xFF8E9BB0),
+                                        fontSize = 13.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+
+                                else -> {
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("daily_leaderboard_list"),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        itemsIndexed(
+                                            items = entries,
+                                            key = { _, item -> item.userId.ifEmpty { item.id } }
+                                        ) { index, entry ->
+                                            LeaderboardRow(
+                                                rank = index + 1,
+                                                entry = entry,
+                                                isCurrentUser = entry.userId == currentUserId,
+                                                numberFormat = numberFormat
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -519,6 +647,77 @@ fun DailyLeaderboardDialog(
 }
 
 @Composable
+private fun HighScoreComparisonBanner(
+    entries: List<GlobalLeaderboardEntry>,
+    currentUserId: String,
+    playerBestScore: Int,
+    numberFormat: NumberFormat
+) {
+    val myIndex = entries.indexOfFirst { it.userId == currentUserId }
+    val leader = entries.first()
+    val leaderName = leader.displayName.ifBlank { "Player" }
+    val leaderScore = leader.bestScore.toInt()
+
+    val comparisonText = when {
+        myIndex == 0 && entries.size > 1 -> {
+            val runnerUp = entries[1]
+            val lead = (playerBestScore - runnerUp.bestScore.toInt()).coerceAtLeast(0)
+            "Leading #2 ${runnerUp.displayName.ifBlank { "Player" }} by +${numberFormat.format(lead)} pts"
+        }
+        myIndex == 0 -> {
+            "#1 Worldwide! Set an even higher score to defend your crown"
+        }
+        myIndex == 1 -> {
+            val gapToFirst = (leaderScore - playerBestScore).coerceAtLeast(0)
+            "${numberFormat.format(gapToFirst)} pts behind #1 $leaderName to take 1st!"
+        }
+        myIndex > 1 -> {
+            val above = entries[myIndex - 1]
+            val gapToAbove = (above.bestScore.toInt() - playerBestScore).coerceAtLeast(0)
+            val gapToFirst = (leaderScore - playerBestScore).coerceAtLeast(0)
+            "${numberFormat.format(gapToAbove)} pts to pass #${myIndex} ${above.displayName.ifBlank { "Player" }} • ${numberFormat.format(gapToFirst)} behind #1"
+        }
+        playerBestScore > 0 -> {
+            val gapToFirst = (leaderScore - playerBestScore).coerceAtLeast(0)
+            "${numberFormat.format(gapToFirst)} pts behind #1 $leaderName (${numberFormat.format(leaderScore)})"
+        }
+        else -> {
+            "Top score to beat: ${numberFormat.format(leaderScore)} pts by $leaderName"
+        }
+    }
+
+    val isLeading = myIndex == 0
+    val accentColor = if (isLeading) GoldAccent else Color(0xFF00E5FF)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(accentColor.copy(alpha = 0.12f))
+            .border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 7.dp)
+            .testTag("leaderboard_comparison_banner"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.EmojiEvents,
+            contentDescription = null,
+            tint = accentColor,
+            modifier = Modifier.size(15.dp)
+        )
+        Text(
+            text = comparisonText,
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 private fun LoadingLeaderboardState(message: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         CircularProgressIndicator(
@@ -535,6 +734,49 @@ private fun LoadingLeaderboardState(message: String) {
 }
 
 @Composable
+private fun GuestLeaderboardPrompt(onSignInWithGoogle: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .testTag("leaderboard_guest_prompt"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "Guest Mode Active",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Black
+        )
+        Text(
+            text = "Sign in with Google to sync your high score and compete on the live global & daily leaderboards.",
+            color = Color(0xFF8E9BB0),
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center
+        )
+        Button(
+            onClick = onSignInWithGoogle,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .testTag("leaderboard_guest_sign_in_button"),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.White,
+                contentColor = Color(0xFF121629)
+            )
+        ) {
+            Text(
+                text = "Sign in with Google",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black
+            )
+        }
+    }
+}
+
+@Composable
 private fun ErrorLeaderboardState(errorMessage: String) {
     Text(
         text = errorMessage,
@@ -543,6 +785,132 @@ private fun ErrorLeaderboardState(errorMessage: String) {
         textAlign = TextAlign.Center,
         modifier = Modifier.padding(16.dp)
     )
+}
+
+@Composable
+private fun HighScoreLeaderboardRow(
+    rank: Int,
+    entry: GlobalLeaderboardEntry,
+    isCurrentUser: Boolean,
+    playerReferenceBestScore: Int,
+    numberFormat: NumberFormat
+) {
+    val rankColor = when (rank) {
+        1 -> GoldAccent
+        2 -> Color(0xFFE0E0E0)
+        3 -> Color(0xFFFF8A65)
+        else -> Color(0xFF8E9BB0)
+    }
+    val deltaVsYou = entry.bestScore.toInt() - playerReferenceBestScore
+    val deltaText = when {
+        isCurrentUser -> null
+        deltaVsYou > 0 -> "+${numberFormat.format(deltaVsYou)} vs you"
+        deltaVsYou < 0 -> "-${numberFormat.format(-deltaVsYou)} vs you"
+        else -> "TIED"
+    }
+    val deltaColor = when {
+        deltaVsYou > 0 -> Color(0xFFFF8A65)
+        deltaVsYou < 0 -> Color(0xFF00E676)
+        else -> Color(0xFF00E5FF)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isCurrentUser) Color(0xFF192844) else Color(0xFF101424))
+            .border(
+                width = if (isCurrentUser) 1.5.dp else 1.dp,
+                color = if (isCurrentUser) Color(0xFF00E5FF) else BoardBorder,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(rankColor.copy(alpha = if (rank <= 3) 0.22f else 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$rank",
+                    color = rankColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = entry.displayName.ifBlank { "Player" },
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (isCurrentUser) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF00E5FF))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = "YOU",
+                                color = Color(0xFF0F111E),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = "Total ${numberFormat.format(entry.totalScore)} • ${entry.totalLinesCleared} lines • x${entry.highestCombo}",
+                    color = Color(0xFF8E9BB0),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = numberFormat.format(entry.bestScore),
+                color = if (rank == 1) GoldAccent else Color(0xFF00E5FF),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black
+            )
+            if (deltaText != null) {
+                Text(
+                    text = deltaText,
+                    color = deltaColor,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            } else {
+                Text(
+                    text = "HIGH SCORE",
+                    color = Color(0xFF6B7792),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
 }
 
 @Composable

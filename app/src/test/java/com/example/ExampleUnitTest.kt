@@ -141,6 +141,41 @@ class ExampleUnitTest {
         )
     }
 
+    @Test
+    fun testDailyLoginRewardScheduleProgressionAndCalendar() {
+        val schedule = com.example.model.DailyLoginRewardSchedule
+
+        // Brand new player: Day 1 claimable, 2-7 locked
+        assertTrue(schedule.canClaimToday("", "2026-11-16"))
+        assertEquals(1, schedule.computeNextStreak("", 0, "2026-11-16", "2026-11-15"))
+        val freshCalendar = schedule.buildCalendar("", 0, "2026-11-16", "2026-11-15")
+        assertEquals(7, freshCalendar.size)
+        assertEquals(com.example.model.DailyLoginDayStatus.CLAIMABLE, freshCalendar[0].status)
+        assertEquals(com.example.model.DailyLoginDayStatus.LOCKED, freshCalendar[1].status)
+
+        // Consecutive day after Day 2 claim: Day 1 & 2 claimed, Day 3 claimable
+        assertEquals(3, schedule.computeNextStreak("2026-11-15", 2, "2026-11-16", "2026-11-15"))
+        val day3Calendar = schedule.buildCalendar("2026-11-15", 2, "2026-11-16", "2026-11-15")
+        assertEquals(com.example.model.DailyLoginDayStatus.CLAIMED, day3Calendar[0].status)
+        assertEquals(com.example.model.DailyLoginDayStatus.CLAIMED, day3Calendar[1].status)
+        assertEquals(com.example.model.DailyLoginDayStatus.CLAIMABLE, day3Calendar[2].status)
+        assertEquals(com.example.model.DailyLoginDayStatus.LOCKED, day3Calendar[3].status)
+
+        // Same day already claimed -> cannot claim again, Day 7 Jackpot gives 500 coins & 3 hammers
+        assertFalse(schedule.canClaimToday("2026-11-16", "2026-11-16"))
+        val jackpot = schedule.tierForStreak(7)
+        assertEquals(500, jackpot.coins)
+        assertEquals(3, jackpot.hammers)
+        assertTrue(jackpot.isJackpot)
+
+        // Day 8 wraps around to Day 1 tier while streak stays 8
+        assertEquals(1, schedule.tierForStreak(8).cycleDay)
+
+        // Missed day resets streak to 1 and active streak to 0
+        assertEquals(0, schedule.computeActiveStreak("2026-11-13", 5, "2026-11-16", "2026-11-15"))
+        assertEquals(1, schedule.computeNextStreak("2026-11-13", 5, "2026-11-16", "2026-11-15"))
+    }
+
     private fun canPlaceTest(
         grid: List<List<Int>>,
         shape: BlockShape,

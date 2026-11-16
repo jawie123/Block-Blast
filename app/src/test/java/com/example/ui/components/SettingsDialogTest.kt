@@ -10,6 +10,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import com.example.model.AchievementCatalog
+import com.example.model.GameMode
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -103,5 +106,78 @@ class SettingsDialogTest {
         composeTestRule.onNodeWithTag("settings_done_button").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("settings_dialog").assertDoesNotExist()
+    }
+
+    @Test
+    fun `settings dialog displays dedicated achievements section with unlocked status and progress`() {
+        var showSettings by mutableStateOf(true)
+        val achievements = AchievementCatalog.evaluateAll(
+            maxCombo = 10,
+            bestScore = 2750,
+            dailyStreak = 2,
+            totalLines = 25,
+            dailyCompletedCount = 0
+        )
+
+        composeTestRule.setContent {
+            if (showSettings) {
+                SettingsDialog(
+                    isMusicEnabled = true,
+                    isSoundEnabled = true,
+                    isHapticsEnabled = true,
+                    achievements = achievements,
+                    onToggleMusic = {},
+                    onToggleSound = {},
+                    onToggleHaptics = {},
+                    onDismiss = { showSettings = false }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("settings_achievements_section").performScrollTo()
+        composeTestRule.onNodeWithTag("settings_achievements_section").assertIsDisplayed()
+        composeTestRule.onNodeWithText("ACHIEVEMENTS").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("achievements_count_badge").assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 / 5 UNLOCKED").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("achievement_card_combo_10").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("10-Line Combo").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("achievement_card_high_scorer").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("High Scorer").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("achievement_card_daily_streak").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Daily Streak").assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 / 3").assertIsDisplayed()
+
+        // Done button stays pinned and clickable even after scrolling
+        composeTestRule.onNodeWithTag("settings_done_button").performClick()
+        composeTestRule.waitForIdle()
+        assertFalse(showSettings)
+    }
+
+    @Test
+    fun `score header displays daily streak and solved status in daily challenge mode`() {
+        composeTestRule.setContent {
+            ScoreHeader(
+                score = 5200,
+                highScore = 5200,
+                comboStreak = 2,
+                gameMode = GameMode.DAILY_CHALLENGE,
+                dailyStreak = 4,
+                isDailyCompletedToday = true,
+                dailyPuzzleTitle = "Grid #42",
+                onShowStats = {},
+                onRestart = {}
+            )
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("daily_challenge_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_streak_badge", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("🔥4d", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_target_status", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("✅ SOLVED", useUnmergedTree = true).assertIsDisplayed()
     }
 }

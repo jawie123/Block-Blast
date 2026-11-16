@@ -72,6 +72,20 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    // Validation Helper: User Daily Login Reward & Streak Profile
+    function isValidDailyLoginReward(data, userId) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId == userId && data.userId.size() <= 128 &&
+             data.loginStreak is int && data.loginStreak >= 0 && data.loginStreak <= 100000 &&
+             data.longestLoginStreak is int && data.longestLoginStreak >= 0 && data.longestLoginStreak <= 100000 &&
+             data.lastClaimDate is string && (data.lastClaimDate == '' || isValidDateId(data.lastClaimDate)) &&
+             data.totalDaysClaimed is int && data.totalDaysClaimed >= 0 && data.totalDaysClaimed <= 100000 &&
+             data.coinsBalance is int && data.coinsBalance >= 0 && data.coinsBalance <= 100000000 &&
+             data.totalCoinsEarned is int && data.totalCoinsEarned >= 0 && data.totalCoinsEarned <= 100000000 &&
+             data.totalHammersEarned is int && data.totalHammersEarned >= 0 && data.totalHammersEarned <= 1000000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
     // 1. Global Daily Challenge Leaderboard
     match /daily_challenges/{dateStr}/scores/{scoreUserId} {
       allow get: if isSignedIn() && isValidDateId(dateStr) && isValidId(scoreUserId);
@@ -101,12 +115,12 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidDateId(dateStr) && isValidId(scoreUserId) && request.auth.uid == scoreUserId;
     }
 
-    // 2. All-Time Global Leaderboard (Ranked by Total Score)
+    // 2. Global Leaderboard (Ranked by Single-Game High Score or Cumulative Total Score)
     match /global_leaderboard/{entryUserId} {
       allow get: if isSignedIn() && isValidId(entryUserId);
 
-      // Client queries MUST align with whereGreaterThanOrEqualTo("totalScore", 0)
-      allow list: if isSignedIn() && resource.data.totalScore >= 0;
+      // Client queries MUST align with whereGreaterThanOrEqualTo("totalScore", 0) or whereGreaterThanOrEqualTo("bestScore", 0)
+      allow list: if isSignedIn() && (resource.data.totalScore >= 0 || resource.data.bestScore >= 0);
 
       allow create: if isSignedIn() &&
                        isValidId(entryUserId) &&
@@ -156,6 +170,36 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly(['gameMode', 'gridFlat', 'pieces', 'score', 'comboStreak', 'maxComboSession', 'linesClearedSession', 'isGameOver', 'secondChanceAvailable', 'dailyDate', 'dailyBatchIndex', 'hammerCount', 'clientUpdatedAt', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && request.auth.uid == userId;
+    }
+
+    // 4. Private User Daily Login Rewards & Streak Profile
+    match /users/{userId}/rewards/{rewardId} {
+      allow get: if isSignedIn() && isValidId(userId) && rewardId == 'daily_login' && request.auth.uid == userId;
+
+      allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       rewardId == 'daily_login' &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(['userId', 'loginStreak', 'longestLoginStreak', 'lastClaimDate', 'totalDaysClaimed', 'coinsBalance', 'totalCoinsEarned', 'totalHammersEarned', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'loginStreak', 'longestLoginStreak', 'lastClaimDate', 'totalDaysClaimed', 'coinsBalance', 'totalCoinsEarned', 'totalHammersEarned', 'createdAt', 'updatedAt']) &&
+                       isValidDailyLoginReward(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       isValidDailyLoginReward(incoming(), userId) &&
+                       isValidId(userId) &&
+                       rewardId == 'daily_login' &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().longestLoginStreak >= existing().longestLoginStreak &&
+                       incoming().totalDaysClaimed >= existing().totalDaysClaimed &&
+                       incoming().totalCoinsEarned >= existing().totalCoinsEarned &&
+                       incoming().totalHammersEarned >= existing().totalHammersEarned &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['loginStreak', 'longestLoginStreak', 'lastClaimDate', 'totalDaysClaimed', 'coinsBalance', 'totalCoinsEarned', 'totalHammersEarned', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && rewardId == 'daily_login' && request.auth.uid == userId;
     }
   }
 }

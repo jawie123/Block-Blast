@@ -70,10 +70,18 @@ private fun AppContent(
     localSessionStorage: LocalSessionStorage
 ) {
     var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
+    var isGuestMode by remember {
+        mutableStateOf(preferences.isGuestSession && Firebase.auth.currentUser == null)
+    }
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
+            val signedInUser = auth.currentUser
+            currentUser = signedInUser
+            if (signedInUser != null) {
+                preferences.isGuestSession = false
+                isGuestMode = false
+            }
         }
         Firebase.auth.addAuthStateListener(listener)
         onDispose {
@@ -82,24 +90,42 @@ private fun AppContent(
     }
 
     val user = currentUser
-    if (user == null) {
-        // Gate all Firestore queries & feature ViewModels until Google Sign-In completes
+    if (user == null && !isGuestMode) {
+        // Gate all Firestore queries & cloud sync until Google Sign-In completes, or enter offline Guest mode
         AuthScreen(
-            onAuthSuccess = { currentUser = Firebase.auth.currentUser }
+            onAuthSuccess = {
+                preferences.isGuestSession = false
+                isGuestMode = false
+                currentUser = Firebase.auth.currentUser
+            },
+            onContinueAsGuest = {
+                preferences.isGuestSession = true
+                isGuestMode = true
+            }
         )
     } else {
-        val uid = user.uid
-        val displayName = user.displayName?.takeIf { it.isNotBlank() } ?: "Player"
+        val isGuestSession = user == null
+        val sessionKey = user?.uid ?: "guest"
+        val uid = user?.uid ?: ""
+        val displayName = if (isGuestSession) {
+            "Guest"
+        } else {
+            user?.displayName?.takeIf { it.isNotBlank() } ?: "Player"
+        }
         val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
         val credentialManager = remember(context) { CredentialManager.create(context) }
 
-        key(uid) {
+        key(sessionKey) {
             val firestoreRepository = remember(uid) {
-                GameFirestoreRepository(context.applicationContext)
+                if (uid.isNotBlank()) {
+                    GameFirestoreRepository(context.applicationContext)
+                } else {
+                    null
+                }
             }
             val gameViewModel: GameViewModel = viewModel(
-                key = uid,
+                key = sessionKey,
                 factory = GameViewModel.provideFactory(
                     context = context.applicationContext,
                     soundManager = soundManager,
@@ -113,11 +139,16 @@ private fun AppContent(
             GameScreen(
                 viewModel = gameViewModel,
                 onSignOut = {
-                    gameViewModel.flushSession(syncToCloud = true)
-                    signOut(
-                        credentialManager = credentialManager,
-                        scope = coroutineScope
-                    )
+                    gameViewModel.flushSession(syncToCloud = !isGuestSession)
+                    if (isGuestSession) {
+                        preferences.isGuestSession = false
+                        isGuestMode = false
+                    } else {
+                        signOut(
+                            credentialManager = credentialManager,
+                            scope = coroutineScope
+                        )
+                    }
                 }
             )
         }

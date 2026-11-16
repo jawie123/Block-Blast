@@ -582,4 +582,84 @@ class ExampleRobolectricTest {
         assertFalse(freshViewModel.gameState.value.isSoundEnabled)
         assertFalse(freshViewModel.gameState.value.isHapticsEnabled)
     }
+
+    @Test
+    fun `test daily challenge generates unique configurations per day and tracks streak and solve status`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = com.example.data.GamePreferences(context)
+
+        // Different day seeds yield unique board configurations
+        val day1Board = com.example.model.DailyPuzzleGenerator.generateInitialBoard(20261115L)
+        val day2Board = com.example.model.DailyPuzzleGenerator.generateInitialBoard(20261116L)
+        assertTrue(day1Board != day2Board)
+
+        // Consecutive daily participation increments streak; same day is idempotent; missed day resets to 1
+        prefs.dailyStreak = 0
+        prefs.dailyLastPlayedDate = ""
+        assertEquals(1, prefs.recordDailyParticipation(todayDate = "2026-11-14", yesterdayDate = "2026-11-13"))
+        assertEquals(1, prefs.recordDailyParticipation(todayDate = "2026-11-14", yesterdayDate = "2026-11-13"))
+        assertEquals(2, prefs.recordDailyParticipation(todayDate = "2026-11-15", yesterdayDate = "2026-11-14"))
+        assertEquals(3, prefs.recordDailyParticipation(todayDate = "2026-11-16", yesterdayDate = "2026-11-15"))
+        // Missed a day (yesterday was 2026-11-17, last played 2026-11-16)
+        assertEquals(1, prefs.recordDailyParticipation(todayDate = "2026-11-18", yesterdayDate = "2026-11-17"))
+
+        // Daily completion marks solved status once per date
+        assertFalse(prefs.isDailyDateCompleted("2026-11-16"))
+        assertTrue(prefs.markDailyDateCompleted("2026-11-16"))
+        assertFalse(prefs.markDailyDateCompleted("2026-11-16"))
+        assertTrue(prefs.isDailyDateCompleted("2026-11-16"))
+        assertEquals(1, prefs.dailyChallengesCompleted)
+    }
+
+    @Test
+    fun `test achievement system tracks and persists milestones across sessions`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val soundManager = com.example.audio.SoundManager(context)
+        val prefs = com.example.data.GamePreferences(context)
+
+        // Pre-populate milestones: 10x combo, 2500+ score, 3-day streak, 50 lines, 1 daily solved
+        prefs.highestCombo = 10
+        prefs.highScore = 2600
+        prefs.dailyStreak = 3
+        prefs.totalLinesCleared = 50
+        prefs.dailyChallengesCompleted = 1
+
+        val viewModel = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = null
+        )
+
+        val achievements = viewModel.gameState.value.achievements
+        assertEquals(5, achievements.size)
+        assertEquals(5, viewModel.gameState.value.unlockedAchievementsCount)
+
+        val combo10 = achievements.first { it.id == "combo_10" }
+        val highScorer = achievements.first { it.id == "high_scorer" }
+        val dailyStreak = achievements.first { it.id == "daily_streak" }
+        val lineMaster = achievements.first { it.id == "line_master" }
+        val puzzleSolver = achievements.first { it.id == "puzzle_solver" }
+
+        assertEquals("10-Line Combo", combo10.title)
+        assertTrue(combo10.isUnlocked)
+        assertEquals("High Scorer", highScorer.title)
+        assertTrue(highScorer.isUnlocked)
+        assertEquals("Daily Streak", dailyStreak.title)
+        assertTrue(dailyStreak.isUnlocked)
+        assertTrue(lineMaster.isUnlocked)
+        assertTrue(puzzleSolver.isUnlocked)
+
+        // Even if active preferences reset in-memory stats, unlocked status remains persisted
+        prefs.highestCombo = 0
+        prefs.highScore = 0
+        val freshVm = com.example.viewmodel.GameViewModel(
+            context = context,
+            soundManager = soundManager,
+            preferences = prefs,
+            localSessionStorage = null
+        )
+        assertTrue(freshVm.gameState.value.achievements.first { it.id == "combo_10" }.isUnlocked)
+        assertTrue(freshVm.gameState.value.achievements.first { it.id == "high_scorer" }.isUnlocked)
+    }
 }

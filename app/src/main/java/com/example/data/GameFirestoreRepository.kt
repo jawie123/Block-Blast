@@ -4,6 +4,9 @@ import android.content.Context
 import com.example.R
 import com.example.model.BlockShape
 import com.example.model.DailyLeaderboardEntry
+import com.example.model.DailyLoginClaimResult
+import com.example.model.DailyLoginRewardProfile
+import com.example.model.DailyLoginRewardSchedule
 import com.example.model.GameMode
 import com.example.model.GlobalLeaderboardEntry
 import com.example.model.SavedGameSessionData
@@ -165,6 +168,115 @@ class GameFirestoreRepository(
                     throw error
                 }
         )
+    }
+
+    /**
+     * Real-time top 50 Global High Score Leaderboard observer aligned with security rule
+     * `resource.data.bestScore >= 0`.
+     */
+    fun observeHighScoreLeaderboard(): Flow<List<GlobalLeaderboardEntry>> = flow {
+        val uid = requireUserId()
+        val path = "global_leaderboard"
+        emitAll(
+            db.collection("global_leaderboard")
+                .whereGreaterThanOrEqualTo("bestScore", 0)
+                .orderBy("bestScore", Query.Direction.DESCENDING)
+                .limit(50)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        GlobalLeaderboardEntry::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    /**
+     * Synchronizes a player's local single-game high score and cumulative totals with
+     * /global_leaderboard/{uid} (for example after playing in Guest Mode before signing in),
+     * strictly honoring monotonic non-decreasing rules.
+     */
+    suspend fun syncHighScoreProfile(
+        displayName: String,
+        bestSingleGameScore: Int,
+        totalScoreFloor: Long = 0L,
+        totalLinesFloor: Long = 0L,
+        highestCombo: Int = 0
+    ): Result<Unit> {
+        return try {
+            val uid = requireUserId()
+            val safeName = displayName.trim().ifEmpty { "Player" }.take(60)
+            val safeBest = bestSingleGameScore.coerceAtLeast(0).toLong().coerceAtMost(10_000_000L)
+            val safeTotalFloor = totalScoreFloor.coerceAtLeast(0L).coerceAtMost(1_000_000_000L)
+            val safeLinesFloor = totalLinesFloor.coerceAtLeast(0L).coerceAtMost(10_000_000L)
+            val safeCombo = highestCombo.coerceAtLeast(0).toLong().coerceAtMost(10_000L)
+
+            if (safeBest == 0L && safeTotalFloor == 0L && safeLinesFloor == 0L && safeCombo == 0L) {
+                return Result.success(Unit)
+            }
+
+            val docRef = db.collection("global_leaderboard").document(uid)
+            val existingSnap = docRef.get().await()
+            if (existingSnap.exists()) {
+                val existingName = existingSnap.getString("displayName") ?: ""
+                val existingTotal = existingSnap.getLong("totalScore") ?: 0L
+                val existingBest = existingSnap.getLong("bestScore") ?: 0L
+                val existingLines = existingSnap.getLong("totalLinesCleared") ?: 0L
+                val existingCombo = existingSnap.getLong("highestCombo") ?: 0L
+
+                val nextTotal = maxOf(existingTotal, safeTotalFloor).coerceAtMost(1_000_000_000L)
+                val nextBest = maxOf(existingBest, safeBest).coerceAtMost(10_000_000L)
+                val nextLines = maxOf(existingLines, safeLinesFloor).coerceAtMost(10_000_000L)
+                val nextCombo = maxOf(existingCombo, safeCombo).coerceAtMost(10_000L)
+
+                if (nextTotal > existingTotal ||
+                    nextBest > existingBest ||
+                    nextLines > existingLines ||
+                    nextCombo > existingCombo ||
+                    existingName != safeName
+                ) {
+                    val updates = mapOf(
+                        "displayName" to safeName,
+                        "totalScore" to nextTotal,
+                        "bestScore" to nextBest,
+                        "totalLinesCleared" to nextLines,
+                        "highestCombo" to nextCombo,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    docRef.update(updates).await()
+                }
+            } else {
+                val payload = mapOf(
+                    "userId" to uid,
+                    "displayName" to safeName,
+                    "totalScore" to safeTotalFloor,
+                    "bestScore" to safeBest,
+                    "totalLinesCleared" to safeLinesFloor,
+                    "highestCombo" to safeCombo,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                docRef.set(payload).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "global_leaderboard")
+            Result.failure(e)
+        }
     }
 
     /**
@@ -394,6 +506,352 @@ class GameFirestoreRepository(
         GameMode.CLASSIC -> "classic"
         GameMode.DAILY_CHALLENGE -> "daily"
         GameMode.TIME_ATTACK -> null
+    }
+
+    /**
+     * Real-time observer for the signed-in user's daily login streak and currency balance at
+     * /users/{uid}/rewards/daily_login.
+     */
+    fun observeDailyLoginReward(): Flow<DailyLoginRewardProfile?> = flow {
+        val uid = requireUserId()
+        val path = "users/$uid/rewards/$DAILY_LOGIN_DOC_ID"
+        emitAll(
+            db.collection("users")
+                .document(uid)
+                .collection("rewards")
+                .document(DAILY_LOGIN_DOC_ID)
+                .snapshots()
+                .map { snapshot ->
+                    if (!snapshot.exists()) {
+                        null
+                    } else {
+                        snapshot.toObject(
+                            DailyLoginRewardProfile::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        )
+                    }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.GET, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    /**
+     * Claims today's escalating daily login reward in Firestore, advancing consecutive streak
+     * or resetting to Day 1 if a day was missed, while strictly preventing duplicate claims
+     * for the same [todayDate].
+     */
+    suspend fun claimDailyLoginReward(
+        todayDate: String,
+        yesterdayDate: String,
+        localSeed: DailyLoginRewardProfile? = null
+    ): Result<DailyLoginClaimResult> {
+        var targetPath = "users/unknown/rewards/$DAILY_LOGIN_DOC_ID"
+        return try {
+            val uid = requireUserId()
+            targetPath = "users/$uid/rewards/$DAILY_LOGIN_DOC_ID"
+            val docRef = db.collection("users")
+                .document(uid)
+                .collection("rewards")
+                .document(DAILY_LOGIN_DOC_ID)
+
+            val existingSnap = docRef.get().await()
+            if (existingSnap.exists()) {
+                val currentProfile = existingSnap.toObject(
+                    DailyLoginRewardProfile::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                ) ?: DailyLoginRewardProfile(id = DAILY_LOGIN_DOC_ID, userId = uid)
+
+                if (currentProfile.lastClaimDate == todayDate) {
+                    return Result.success(
+                        DailyLoginClaimResult(
+                            claimed = false,
+                            grantedTier = null,
+                            profile = currentProfile
+                        )
+                    )
+                }
+
+                val nextStreak = DailyLoginRewardSchedule.computeNextStreak(
+                    lastClaimDate = currentProfile.lastClaimDate,
+                    storedStreak = currentProfile.loginStreak.toInt(),
+                    todayDate = todayDate,
+                    yesterdayDate = yesterdayDate
+                ).toLong().coerceIn(1L, 100_000L)
+                val tier = DailyLoginRewardSchedule.tierForStreak(nextStreak.toInt())
+                val nextLongest = maxOf(currentProfile.longestLoginStreak, nextStreak).coerceIn(1L, 100_000L)
+                val nextTotalDays = (currentProfile.totalDaysClaimed + 1L).coerceAtMost(100_000L)
+                val nextCoins = (currentProfile.coinsBalance + tier.coins.toLong()).coerceAtMost(100_000_000L)
+                val nextTotalCoins = (currentProfile.totalCoinsEarned + tier.coins.toLong()).coerceAtMost(100_000_000L)
+                val nextTotalHammers = (currentProfile.totalHammersEarned + tier.hammers.toLong()).coerceAtMost(1_000_000L)
+
+                val updates = mapOf(
+                    "loginStreak" to nextStreak,
+                    "longestLoginStreak" to nextLongest,
+                    "lastClaimDate" to todayDate,
+                    "totalDaysClaimed" to nextTotalDays,
+                    "coinsBalance" to nextCoins,
+                    "totalCoinsEarned" to nextTotalCoins,
+                    "totalHammersEarned" to nextTotalHammers,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                docRef.update(updates).await()
+
+                val updatedProfile = currentProfile.copy(
+                    id = DAILY_LOGIN_DOC_ID,
+                    userId = uid,
+                    loginStreak = nextStreak,
+                    longestLoginStreak = nextLongest,
+                    lastClaimDate = todayDate,
+                    totalDaysClaimed = nextTotalDays,
+                    coinsBalance = nextCoins,
+                    totalCoinsEarned = nextTotalCoins,
+                    totalHammersEarned = nextTotalHammers
+                )
+                Result.success(DailyLoginClaimResult(claimed = true, grantedTier = tier, profile = updatedProfile))
+            } else {
+                val seedLastDate = localSeed?.lastClaimDate ?: ""
+                val seedStreak = (localSeed?.loginStreak ?: 0L).toInt()
+                val seedLongest = (localSeed?.longestLoginStreak ?: 0L).coerceIn(0L, 100_000L)
+                val seedTotalDays = (localSeed?.totalDaysClaimed ?: 0L).coerceIn(0L, 100_000L)
+                val seedCoins = (localSeed?.coinsBalance ?: 0L).coerceIn(0L, 100_000_000L)
+                val seedTotalCoins = (localSeed?.totalCoinsEarned ?: 0L).coerceIn(0L, 100_000_000L)
+                val seedTotalHammers = (localSeed?.totalHammersEarned ?: 0L).coerceIn(0L, 1_000_000L)
+
+                if (seedLastDate == todayDate && seedTotalDays > 0L) {
+                    val payload = mapOf(
+                        "userId" to uid,
+                        "loginStreak" to seedStreak.toLong().coerceIn(1L, 100_000L),
+                        "longestLoginStreak" to maxOf(seedLongest, seedStreak.toLong()).coerceIn(1L, 100_000L),
+                        "lastClaimDate" to todayDate,
+                        "totalDaysClaimed" to seedTotalDays,
+                        "coinsBalance" to seedCoins,
+                        "totalCoinsEarned" to maxOf(seedTotalCoins, seedCoins),
+                        "totalHammersEarned" to seedTotalHammers,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    docRef.set(payload).await()
+                    val syncedProfile = DailyLoginRewardProfile(
+                        id = DAILY_LOGIN_DOC_ID,
+                        userId = uid,
+                        loginStreak = seedStreak.toLong().coerceIn(1L, 100_000L),
+                        longestLoginStreak = maxOf(seedLongest, seedStreak.toLong()).coerceIn(1L, 100_000L),
+                        lastClaimDate = todayDate,
+                        totalDaysClaimed = seedTotalDays,
+                        coinsBalance = seedCoins,
+                        totalCoinsEarned = maxOf(seedTotalCoins, seedCoins),
+                        totalHammersEarned = seedTotalHammers
+                    )
+                    return Result.success(
+                        DailyLoginClaimResult(claimed = false, grantedTier = null, profile = syncedProfile)
+                    )
+                }
+
+                val nextStreak = DailyLoginRewardSchedule.computeNextStreak(
+                    lastClaimDate = seedLastDate,
+                    storedStreak = seedStreak,
+                    todayDate = todayDate,
+                    yesterdayDate = yesterdayDate
+                ).toLong().coerceIn(1L, 100_000L)
+                val tier = DailyLoginRewardSchedule.tierForStreak(nextStreak.toInt())
+                val nextLongest = maxOf(seedLongest, nextStreak).coerceIn(1L, 100_000L)
+                val nextTotalDays = (seedTotalDays + 1L).coerceAtMost(100_000L)
+                val nextCoins = (seedCoins + tier.coins.toLong()).coerceAtMost(100_000_000L)
+                val nextTotalCoins = (maxOf(seedTotalCoins, seedCoins) + tier.coins.toLong()).coerceAtMost(100_000_000L)
+                val nextTotalHammers = (seedTotalHammers + tier.hammers.toLong()).coerceAtMost(1_000_000L)
+
+                val payload = mapOf(
+                    "userId" to uid,
+                    "loginStreak" to nextStreak,
+                    "longestLoginStreak" to nextLongest,
+                    "lastClaimDate" to todayDate,
+                    "totalDaysClaimed" to nextTotalDays,
+                    "coinsBalance" to nextCoins,
+                    "totalCoinsEarned" to nextTotalCoins,
+                    "totalHammersEarned" to nextTotalHammers,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                docRef.set(payload).await()
+
+                val createdProfile = DailyLoginRewardProfile(
+                    id = DAILY_LOGIN_DOC_ID,
+                    userId = uid,
+                    loginStreak = nextStreak,
+                    longestLoginStreak = nextLongest,
+                    lastClaimDate = todayDate,
+                    totalDaysClaimed = nextTotalDays,
+                    coinsBalance = nextCoins,
+                    totalCoinsEarned = nextTotalCoins,
+                    totalHammersEarned = nextTotalHammers
+                )
+                Result.success(DailyLoginClaimResult(claimed = true, grantedTier = tier, profile = createdProfile))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, targetPath)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Synchronizes locally earned Guest Mode daily login progress to Firestore after sign-in,
+     * keeping monotonic totals intact.
+     */
+    suspend fun syncDailyLoginRewardProfile(
+        localProfile: DailyLoginRewardProfile
+    ): Result<DailyLoginRewardProfile?> {
+        var targetPath = "users/unknown/rewards/$DAILY_LOGIN_DOC_ID"
+        return try {
+            val uid = requireUserId()
+            targetPath = "users/$uid/rewards/$DAILY_LOGIN_DOC_ID"
+            val docRef = db.collection("users")
+                .document(uid)
+                .collection("rewards")
+                .document(DAILY_LOGIN_DOC_ID)
+
+            val existingSnap = docRef.get().await()
+            if (!existingSnap.exists()) {
+                if (localProfile.totalDaysClaimed <= 0L && localProfile.coinsBalance <= 0L) {
+                    return Result.success(null)
+                }
+                val safeCoins = localProfile.coinsBalance.coerceIn(0L, 100_000_000L)
+                val safeTotalCoins = maxOf(localProfile.totalCoinsEarned, safeCoins).coerceIn(0L, 100_000_000L)
+                val safeStreak = localProfile.loginStreak.coerceIn(0L, 100_000L)
+                val safeLongest = maxOf(localProfile.longestLoginStreak, safeStreak).coerceIn(0L, 100_000L)
+                val safeDays = localProfile.totalDaysClaimed.coerceIn(0L, 100_000L)
+                val safeHammers = localProfile.totalHammersEarned.coerceIn(0L, 1_000_000L)
+                val payload = mapOf(
+                    "userId" to uid,
+                    "loginStreak" to safeStreak,
+                    "longestLoginStreak" to safeLongest,
+                    "lastClaimDate" to localProfile.lastClaimDate,
+                    "totalDaysClaimed" to safeDays,
+                    "coinsBalance" to safeCoins,
+                    "totalCoinsEarned" to safeTotalCoins,
+                    "totalHammersEarned" to safeHammers,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                docRef.set(payload).await()
+                return Result.success(
+                    localProfile.copy(
+                        id = DAILY_LOGIN_DOC_ID,
+                        userId = uid,
+                        loginStreak = safeStreak,
+                        longestLoginStreak = safeLongest,
+                        totalDaysClaimed = safeDays,
+                        coinsBalance = safeCoins,
+                        totalCoinsEarned = safeTotalCoins,
+                        totalHammersEarned = safeHammers
+                    )
+                )
+            }
+
+            val cloud = existingSnap.toObject(
+                DailyLoginRewardProfile::class.java,
+                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+            ) ?: return Result.success(null)
+
+            if (localProfile.totalDaysClaimed > cloud.totalDaysClaimed) {
+                val mergedLongest = maxOf(cloud.longestLoginStreak, localProfile.longestLoginStreak).coerceIn(0L, 100_000L)
+                val mergedDays = maxOf(cloud.totalDaysClaimed, localProfile.totalDaysClaimed).coerceIn(0L, 100_000L)
+                val mergedTotalCoins = maxOf(cloud.totalCoinsEarned, localProfile.totalCoinsEarned).coerceIn(0L, 100_000_000L)
+                val mergedTotalHammers = maxOf(cloud.totalHammersEarned, localProfile.totalHammersEarned).coerceIn(0L, 1_000_000L)
+                val mergedCoins = maxOf(cloud.coinsBalance, localProfile.coinsBalance).coerceIn(0L, 100_000_000L)
+                val mergedLastDate = maxOf(cloud.lastClaimDate, localProfile.lastClaimDate)
+                val mergedStreak = if (mergedLastDate == localProfile.lastClaimDate) {
+                    localProfile.loginStreak
+                } else {
+                    cloud.loginStreak
+                }.coerceIn(0L, 100_000L)
+
+                val updates = mapOf(
+                    "loginStreak" to mergedStreak,
+                    "longestLoginStreak" to mergedLongest,
+                    "lastClaimDate" to mergedLastDate,
+                    "totalDaysClaimed" to mergedDays,
+                    "coinsBalance" to mergedCoins,
+                    "totalCoinsEarned" to mergedTotalCoins,
+                    "totalHammersEarned" to mergedTotalHammers,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                docRef.update(updates).await()
+                return Result.success(
+                    cloud.copy(
+                        loginStreak = mergedStreak,
+                        longestLoginStreak = mergedLongest,
+                        lastClaimDate = mergedLastDate,
+                        totalDaysClaimed = mergedDays,
+                        coinsBalance = mergedCoins,
+                        totalCoinsEarned = mergedTotalCoins,
+                        totalHammersEarned = mergedTotalHammers
+                    )
+                )
+            }
+            Result.success(cloud)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, targetPath)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Deducts [costCoins] from the signed-in user's Firestore Blast Coins balance when crafting
+     * an extra Hammer power-up.
+     */
+    suspend fun spendCoinsForHammer(
+        costCoins: Int = DailyLoginRewardSchedule.COIN_TO_HAMMER_COST
+    ): Result<Long> {
+        var targetPath = "users/unknown/rewards/$DAILY_LOGIN_DOC_ID"
+        return try {
+            val uid = requireUserId()
+            require(costCoins > 0) { "Cost must be positive." }
+            targetPath = "users/$uid/rewards/$DAILY_LOGIN_DOC_ID"
+            val docRef = db.collection("users")
+                .document(uid)
+                .collection("rewards")
+                .document(DAILY_LOGIN_DOC_ID)
+
+            val snap = docRef.get().await()
+            if (!snap.exists()) {
+                return Result.failure(IllegalStateException("No daily login reward wallet found in Firestore."))
+            }
+            val currentCoins = snap.getLong("coinsBalance") ?: 0L
+            if (currentCoins < costCoins.toLong()) {
+                return Result.failure(IllegalStateException("Insufficient Blast Coins ($currentCoins < $costCoins)."))
+            }
+            val remaining = (currentCoins - costCoins.toLong()).coerceAtLeast(0L)
+            docRef.update(
+                mapOf(
+                    "coinsBalance" to remaining,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(remaining)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, targetPath)
+            Result.failure(e)
+        }
+    }
+
+    private companion object {
+        const val DAILY_LOGIN_DOC_ID = "daily_login"
     }
 
     @Suppress("UNCHECKED_CAST")

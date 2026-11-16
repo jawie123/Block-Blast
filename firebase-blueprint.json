@@ -193,6 +193,67 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "DailyLoginRewardProfile": {
+      "title": "DailyLoginRewardProfile",
+      "description": "Tracks a player's consecutive daily login reward streak, last claim date, and in-game currency & power-up earnings.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the reward owner."
+        },
+        "loginStreak": {
+          "type": "integer",
+          "description": "Current consecutive days played and claimed."
+        },
+        "longestLoginStreak": {
+          "type": "integer",
+          "description": "All-time longest consecutive login streak achieved."
+        },
+        "lastClaimDate": {
+          "type": "string",
+          "description": "Most recent daily login reward claim date in yyyy-MM-dd format (or empty if unclaimed)."
+        },
+        "totalDaysClaimed": {
+          "type": "integer",
+          "description": "Total cumulative daily login rewards claimed across all time."
+        },
+        "coinsBalance": {
+          "type": "integer",
+          "description": "Current spendable Blast Coins balance."
+        },
+        "totalCoinsEarned": {
+          "type": "integer",
+          "description": "Cumulative Blast Coins earned from daily login rewards."
+        },
+        "totalHammersEarned": {
+          "type": "integer",
+          "description": "Cumulative Hammer power-ups earned from daily login rewards."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial profile creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest claim or coin transaction."
+        }
+      },
+      "required": [
+        "userId",
+        "loginStreak",
+        "longestLoginStreak",
+        "lastClaimDate",
+        "totalDaysClaimed",
+        "coinsBalance",
+        "totalCoinsEarned",
+        "totalHammersEarned",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -202,11 +263,15 @@
     },
     "/global_leaderboard/{userId}": {
       "schema": { "$ref": "#/entities/GlobalLeaderboardEntry" },
-      "description": "All-time global leaderboard ranked by cumulative total score across all games."
+      "description": "All-time global leaderboard ranked by single-game high score (bestScore) and cumulative total score (totalScore) for player comparison."
     },
     "/users/{userId}/sessions/{sessionId}": {
       "schema": { "$ref": "#/entities/SavedGameSession" },
       "description": "Private user-scoped active game sessions (classic or daily) for seamless resume."
+    },
+    "/users/{userId}/rewards/{rewardId}": {
+      "schema": { "$ref": "#/entities/DailyLoginRewardProfile" },
+      "description": "Private user-scoped daily login reward streak and Blast Coins wallet."
     }
   }
 }

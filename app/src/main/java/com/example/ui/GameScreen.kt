@@ -62,9 +62,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.audio.AppHaptics
 import com.example.audio.HapticEffect
 import com.example.model.BlockShape
+import com.example.model.DailyLoginRewardSchedule
 import com.example.model.GameMode
 import com.example.ui.components.ComboMultiplierHud
 import com.example.ui.components.DailyLeaderboardDialog
+import com.example.ui.components.DailyLoginRewardDialog
 import com.example.ui.components.DailyMissionsDialog
 import com.example.ui.components.GridBoard
 import com.example.ui.components.GameOverDialog
@@ -97,9 +99,10 @@ fun GameScreen(
     // Dialog state
     var showStatsDialog by remember { mutableStateOf(false) }
     var showMissionsDialog by remember { mutableStateOf(false) }
+    var showLoginRewardDialog by remember { mutableStateOf(false) }
     var showLeaderboardDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
-    var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.ALL_TIME) }
+    var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.HIGH_SCORES) }
     var isLifecyclePaused by remember { mutableStateOf(false) }
 
     // Flush active game session, pause Time Attack countdown, and manage music when app backgrounds
@@ -132,6 +135,7 @@ fun GameScreen(
         showTutorial,
         showStatsDialog,
         showMissionsDialog,
+        showLoginRewardDialog,
         showLeaderboardDialog,
         showSettingsDialog,
         gameState.isGameOver,
@@ -141,6 +145,7 @@ fun GameScreen(
             showTutorial ||
             showStatsDialog ||
             showMissionsDialog ||
+            showLoginRewardDialog ||
             showLeaderboardDialog ||
             showSettingsDialog ||
             gameState.isGameOver
@@ -174,8 +179,65 @@ fun GameScreen(
         }
     }
 
-    // Visual drag lift offset (in pixels) so thumb does not obscure the block
-    val liftOffsetPx = with(density) { 90.dp.toPx() }
+    // Adaptive visual drag lift offset (in pixels) so thumb never obscures the block
+    val liftOffsetPx = with(density) {
+        if (boardCellSizePx > 0f) {
+            (boardCellSizePx * 1.85f).coerceIn(48.dp.toPx(), 84.dp.toPx())
+        } else {
+            72.dp.toPx()
+        }
+    }
+
+    fun updateDragHover(pieceIndex: Int, touchPosRoot: Offset) {
+        val bounds = boardBounds ?: return
+        if (boardCellSizePx <= 0f) return
+        val latestState = viewModel.gameState.value
+        val shape = latestState.activePieces.getOrNull(pieceIndex) ?: return
+
+        val pieceCenterX = touchPosRoot.x
+        val pieceCenterY = touchPosRoot.y - liftOffsetPx
+
+        val shapeWidthPx = shape.width * boardCellSizePx
+        val shapeHeightPx = shape.height * boardCellSizePx
+        val pieceLeftX = pieceCenterX - (shapeWidthPx / 2f)
+        val pieceTopY = pieceCenterY - (shapeHeightPx / 2f)
+
+        val exactColFloat = (pieceLeftX - bounds.left) / boardCellSizePx
+        val exactRowFloat = (pieceTopY - bounds.top) / boardCellSizePx
+        val roundedCol = Math.round(exactColFloat)
+        val roundedRow = Math.round(exactRowFloat)
+
+        if (roundedRow in -1..8 && roundedCol in -1..8) {
+            if (viewModel.canPlaceShape(latestState.grid, shape, roundedRow, roundedCol)) {
+                viewModel.updateHoverPreview(pieceIndex, roundedRow, roundedCol)
+                return
+            }
+            // Magnetic snap: check nearest valid placement within 0.72 cells
+            var bestCandidate: Pair<Int, Int>? = null
+            var bestDistSq = 0.72f * 0.72f
+            for (dr in -1..1) {
+                for (dc in -1..1) {
+                    if (dr == 0 && dc == 0) continue
+                    val candRow = roundedRow + dr
+                    val candCol = roundedCol + dc
+                    val dRow = candRow - exactRowFloat
+                    val dCol = candCol - exactColFloat
+                    val distSq = dRow * dRow + dCol * dCol
+                    if (distSq <= bestDistSq && viewModel.canPlaceShape(latestState.grid, shape, candRow, candCol)) {
+                        bestDistSq = distSq
+                        bestCandidate = Pair(candRow, candCol)
+                    }
+                }
+            }
+            if (bestCandidate != null) {
+                viewModel.updateHoverPreview(pieceIndex, bestCandidate.first, bestCandidate.second)
+            } else {
+                viewModel.updateHoverPreview(pieceIndex, null, null)
+            }
+        } else {
+            viewModel.updateHoverPreview(pieceIndex, null, null)
+        }
+    }
 
     // Active dragging shape
     val draggingShape = draggingIndex?.let { gameState.activePieces.getOrNull(it) }
@@ -191,20 +253,11 @@ fun GameScreen(
             }
             .testTag("game_screen")
     ) {
-        val screenWidth = maxWidth
-        val screenHeight = maxHeight
-
-        // Dynamic board sizing:
-        // Reserve vertical space for compact ScoreHeader (~164dp + optional mode banner) and PieceDeck (~110dp)
-        val reservedVerticalDp = if (gameState.gameMode != GameMode.CLASSIC) 316.dp else 294.dp
-        val maxBoardByHeight = (screenHeight - reservedVerticalDp).coerceAtLeast(220.dp)
-        val maxBoardByWidth = screenWidth - 24.dp
-        val boardSizeDp = minOf(maxBoardByWidth, maxBoardByHeight).coerceIn(240.dp, 400.dp)
+        val isCompactHeight = maxHeight < 580.dp
 
         Column(
             modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // 1. Top Section: Score & Controls
             ScoreHeader(
@@ -214,14 +267,19 @@ fun GameScreen(
                 isSoundEnabled = gameState.isSoundEnabled,
                 isHapticsEnabled = gameState.isHapticsEnabled,
                 canUndo = gameState.canUndo,
+                isGuestMode = gameState.currentUserId.isBlank(),
                 gameMode = gameState.gameMode,
                 dailyGlobalRecord = gameState.dailyGlobalRecord,
                 dailyTargetScore = gameState.dailyTargetScore,
-                dailyStreak = viewModel.getDailyStreak(),
+                dailyStreak = gameState.dailyStreak,
+                isDailyCompletedToday = gameState.isDailyCompletedToday,
                 dailyPuzzleTitle = gameState.dailyPuzzleTitle,
                 hammerCount = gameState.hammerCount,
                 isHammerActive = gameState.isHammerActive,
                 unclaimedMissions = gameState.unclaimedMissionsCount,
+                coinsBalance = gameState.coinsBalance,
+                loginStreak = gameState.loginStreak,
+                canClaimDailyReward = gameState.canClaimDailyLoginReward,
                 difficultyLevel = gameState.difficultyLevel,
                 difficultyTitle = gameState.difficultyTitle,
                 difficultyProgress = gameState.difficultyProgress,
@@ -235,7 +293,7 @@ fun GameScreen(
                 onShowStats = { showStatsDialog = true },
                 onShowTutorial = { viewModel.openTutorial() },
                 onShowLeaderboard = {
-                    leaderboardInitialTab = LeaderboardTab.ALL_TIME
+                    leaderboardInitialTab = LeaderboardTab.HIGH_SCORES
                     showLeaderboardDialog = true
                 },
                 onShowDailyLeaderboard = {
@@ -246,8 +304,10 @@ fun GameScreen(
                 onUndo = { viewModel.undoLastMove() },
                 onToggleHammer = { viewModel.toggleHammerMode() },
                 onShowMissions = { showMissionsDialog = true },
+                onShowDailyRewards = { showLoginRewardDialog = true },
                 onSwitchMode = { mode -> viewModel.switchGameMode(mode) },
-                onRestart = { viewModel.startNewGame() }
+                onRestart = { viewModel.startNewGame() },
+                compactMode = isCompactHeight
             )
 
             // 2. Center Section: 8x8 Game Board + Live Combo Multiplier HUD Overlay
@@ -257,55 +317,61 @@ fun GameScreen(
             val prospectiveLinesCount =
                 gameState.prospectiveRows.size + gameState.prospectiveCols.size
 
-            Box(
-                modifier = Modifier.size(boardSizeDp),
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = if (isCompactHeight) 2.dp else 4.dp),
                 contentAlignment = Alignment.Center
             ) {
-                GridBoard(
-                    gameState = gameState,
-                    ghostColorId = ghostColorId,
-                    onCellTapped = { row, col ->
-                        if (gameState.isHammerActive) {
-                            viewModel.useHammerOnCell(row, col)
-                        } else {
-                            val selectedIndex = gameState.selectedShapeIndex
-                            if (selectedIndex != null) {
-                                viewModel.placeShape(selectedIndex, row, col)
+                val boardSizeDp = minOf(maxWidth, maxHeight).coerceIn(0.dp, 400.dp)
+
+                Box(
+                    modifier = Modifier.size(boardSizeDp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GridBoard(
+                        gameState = gameState,
+                        ghostColorId = ghostColorId,
+                        onCellTapped = { row, col ->
+                            if (gameState.isHammerActive) {
+                                viewModel.useHammerOnCell(row, col)
+                            } else {
+                                val selectedIndex = gameState.selectedShapeIndex
+                                if (selectedIndex != null) {
+                                    viewModel.placeShape(selectedIndex, row, col)
+                                }
                             }
-                        }
-                    },
-                    onBoardPositioned = { bounds, cellSizePx ->
-                        boardBounds = bounds
-                        boardCellSizePx = cellSizePx
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                        },
+                        onBoardPositioned = { bounds, cellSizePx ->
+                            boardBounds = bounds
+                            boardCellSizePx = cellSizePx
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
 
-                ComboMultiplierHud(
-                    comboStreak = gameState.comboStreak,
-                    comboEventId = gameState.comboEventId,
-                    lastClearedLinesCount = gameState.lastClearedLinesCount,
-                    prospectiveLinesCount = prospectiveLinesCount,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 8.dp)
-                )
-            }
+                    ComboMultiplierHud(
+                        comboStreak = gameState.comboStreak,
+                        comboEventId = gameState.comboEventId,
+                        lastClearedLinesCount = gameState.lastClearedLinesCount,
+                        prospectiveLinesCount = prospectiveLinesCount,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 8.dp)
+                    )
+                }
 
-            // 3. Bottom Section: Active Piece Pool (3 slots)
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Hammer mode active banner
-                AnimatedVisibility(
+                // Floating instruction pill (does not shrink or jump board)
+                androidx.compose.animation.AnimatedVisibility(
                     visible = gameState.isHammerActive,
                     enter = fadeIn(),
-                    exit = fadeOut()
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(bottom = 2.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Brush.horizontalGradient(listOf(Color(0xFFFFB300), Color(0xFFFF6F00))))
                             .clickable { viewModel.toggleHammerMode() }
@@ -320,17 +386,19 @@ fun GameScreen(
                     }
                 }
 
-                // Tap mode instruction if a piece is selected
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = gameState.selectedShapeIndex != null && !gameState.isHammerActive,
                     enter = fadeIn(),
-                    exit = fadeOut()
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(bottom = 2.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF1E2640))
+                            .background(Color(0xEE1E2640))
+                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -341,67 +409,49 @@ fun GameScreen(
                         )
                     }
                 }
+            }
 
-                PieceDeck(
-                    pieces = gameState.activePieces,
-                    canFitList = canFitList,
-                    selectedShapeIndex = gameState.selectedShapeIndex,
-                    draggingPieceIndex = draggingIndex,
-                    onSelectPiece = { idx -> viewModel.selectPieceForTap(idx) },
-                    onDragStart = { idx, initialTouchPos ->
-                        val shape = gameState.activePieces.getOrNull(idx)
-                        if (shape != null && (canFitList.getOrNull(idx) == true)) {
-                            viewModel.soundManager.playPickup()
-                            draggingIndex = idx
-                            dragTouchPos = initialTouchPos
-                            viewModel.selectPieceForTap(null)
-                        }
-                    },
-                    onDragMove = { delta ->
-                        dragTouchPos += delta
-                        val bounds = boardBounds
-                        val shape = draggingShape
-                        val currentDragging = draggingIndex
-                        if (bounds != null && shape != null && boardCellSizePx > 0f && currentDragging != null) {
-                            // Target location of shape top-left anchor in root coordinates
-                            val pieceCenterX = dragTouchPos.x
-                            val pieceCenterY = dragTouchPos.y - liftOffsetPx
+            // 3. Bottom Section: Active Piece Pool (3 slots)
+            PieceDeck(
+                pieces = gameState.activePieces,
+                canFitList = canFitList,
+                selectedShapeIndex = gameState.selectedShapeIndex,
+                draggingPieceIndex = draggingIndex,
+                onSelectPiece = { idx -> viewModel.selectPieceForTap(idx) },
+                onDragStart = { idx, initialTouchPos ->
+                    val shape = viewModel.gameState.value.activePieces.getOrNull(idx)
+                    if (shape != null && viewModel.canFitAnywhere(viewModel.gameState.value.grid, shape)) {
+                        viewModel.soundManager.playPickup()
+                        draggingIndex = idx
+                        dragTouchPos = initialTouchPos
+                        viewModel.selectPieceForTap(null)
+                        updateDragHover(idx, initialTouchPos)
+                    }
+                },
+                onDragMove = { delta ->
+                    val currentDragging = draggingIndex ?: return@PieceDeck
+                    val nextTouchPos = dragTouchPos + delta
+                    dragTouchPos = nextTouchPos
+                    updateDragHover(currentDragging, nextTouchPos)
+                },
+                onDragEnd = {
+                    val currentDragging = draggingIndex
+                    val latestState = viewModel.gameState.value
+                    val hoverR = latestState.hoverRow
+                    val hoverC = latestState.hoverCol
 
-                            val shapeWidthPx = shape.width * boardCellSizePx
-                            val shapeHeightPx = shape.height * boardCellSizePx
-                            val pieceLeftX = pieceCenterX - (shapeWidthPx / 2f)
-                            val pieceTopY = pieceCenterY - (shapeHeightPx / 2f)
-
-                            val relativeX = pieceLeftX - bounds.left
-                            val relativeY = pieceTopY - bounds.top
-
-                            val targetCol = Math.round(relativeX / boardCellSizePx)
-                            val targetRow = Math.round(relativeY / boardCellSizePx)
-
-                            if (targetRow in -1..8 && targetCol in -1..8) {
-                                viewModel.updateHoverPreview(currentDragging, targetRow, targetCol)
-                            } else {
-                                viewModel.updateHoverPreview(currentDragging, null, null)
-                            }
-                        }
-                    },
-                    onDragEnd = {
-                        val currentDragging = draggingIndex
-                        val hoverR = gameState.hoverRow
-                        val hoverC = gameState.hoverCol
-
-                        if (currentDragging != null && hoverR != null && hoverC != null) {
-                            val placed = viewModel.placeShape(currentDragging, hoverR, hoverC)
-                            if (!placed) {
-                                viewModel.updateHoverPreview(currentDragging, null, null)
-                            }
-                        } else if (currentDragging != null) {
+                    if (currentDragging != null && hoverR != null && hoverC != null) {
+                        val placed = viewModel.placeShape(currentDragging, hoverR, hoverC)
+                        if (!placed) {
                             viewModel.updateHoverPreview(currentDragging, null, null)
                         }
-                        draggingIndex = null
+                    } else if (currentDragging != null) {
+                        viewModel.updateHoverPreview(currentDragging, null, null)
                     }
-                )
-            }
+                    draggingIndex = null
+                },
+                compactMode = isCompactHeight
+            )
         }
 
         // Floating Drag Overlay (renders above entire screen during drag gesture)
@@ -419,7 +469,8 @@ fun GameScreen(
             Box(
                 modifier = Modifier
                     .offset { IntOffset(overlayPieceLeftX.toInt(), overlayPieceTopY.toInt()) }
-                    .shadow(12.dp)
+                    .shadow(14.dp)
+                    .testTag("dragging_piece_overlay")
             ) {
                 ShapeRenderer(
                     shape = shape,
@@ -451,7 +502,7 @@ fun GameScreen(
                     showLeaderboardDialog = true
                 },
                 onShowGlobalLeaderboard = {
-                    leaderboardInitialTab = LeaderboardTab.ALL_TIME
+                    leaderboardInitialTab = LeaderboardTab.HIGH_SCORES
                     showLeaderboardDialog = true
                 },
                 onRestart = { viewModel.startNewGame() }
@@ -479,7 +530,13 @@ fun GameScreen(
                 isGlobalLoading = gameState.isGlobalLeaderboardLoading,
                 globalErrorMessage = gameState.globalLeaderboardError,
                 playerTotalScore = gameState.totalAllTimeScore,
-                initialTab = leaderboardInitialTab
+                highScoreEntries = gameState.highScoreLeaderboardEntries,
+                isHighScoreLoading = gameState.isHighScoreLeaderboardLoading,
+                highScoreErrorMessage = gameState.highScoreLeaderboardError,
+                playerOverallBestScore = maxOf(gameState.playerOverallBestScore, gameState.highScore, gameState.score),
+                initialTab = leaderboardInitialTab,
+                isGuestMode = gameState.currentUserId.isBlank(),
+                onSignInWithGoogle = onSignOut
             )
         }
 
@@ -490,6 +547,44 @@ fun GameScreen(
                 hammerCount = gameState.hammerCount,
                 onClaimReward = { missionId -> viewModel.claimMissionReward(missionId) },
                 onDismiss = { showMissionsDialog = false }
+            )
+        }
+
+        // Daily Login Rewards Dialog
+        if (showLoginRewardDialog) {
+            val todayDate = remember(gameState.lastLoginClaimDate) { viewModel.getTodayDateString() }
+            val yesterdayDate = remember(gameState.lastLoginClaimDate) { viewModel.getYesterdayDateString() }
+            val calendarDays = remember(
+                gameState.lastLoginClaimDate,
+                gameState.loginStreak,
+                todayDate,
+                yesterdayDate
+            ) {
+                DailyLoginRewardSchedule.buildCalendar(
+                    lastClaimDate = gameState.lastLoginClaimDate,
+                    storedStreak = gameState.loginStreak,
+                    todayDate = todayDate,
+                    yesterdayDate = yesterdayDate
+                )
+            }
+            DailyLoginRewardDialog(
+                calendarDays = calendarDays,
+                loginStreak = gameState.loginStreak,
+                longestLoginStreak = gameState.longestLoginStreak,
+                coinsBalance = gameState.coinsBalance,
+                hammerCount = gameState.hammerCount,
+                canClaimToday = gameState.canClaimDailyLoginReward,
+                nextCycleDay = gameState.dailyLoginNextCycleDay,
+                isLoading = gameState.isDailyLoginLoading,
+                errorMessage = gameState.dailyLoginError,
+                isGuestMode = gameState.currentUserId.isBlank(),
+                onClaimToday = { viewModel.claimDailyLoginReward() },
+                onExchangeCoinsForHammer = { viewModel.exchangeCoinsForHammer() },
+                onSignInWithGoogle = {
+                    showLoginRewardDialog = false
+                    onSignOut()
+                },
+                onDismiss = { showLoginRewardDialog = false }
             )
         }
 
@@ -510,6 +605,7 @@ fun GameScreen(
                 isMusicEnabled = gameState.isMusicEnabled,
                 isSoundEnabled = gameState.isSoundEnabled,
                 isHapticsEnabled = gameState.isHapticsEnabled,
+                achievements = gameState.achievements,
                 onToggleMusic = { viewModel.toggleMusic() },
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },

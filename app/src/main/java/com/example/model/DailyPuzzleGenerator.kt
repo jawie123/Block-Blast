@@ -121,11 +121,10 @@ object DailyPuzzleGenerator {
             }
         }
 
-        // Sprinkle 4 deterministic symmetric accent blocks based on daily RNG
-        repeat(4) { step ->
+        // Sprinkle 6 deterministic accent blocks based on daily RNG for unique day-to-day layouts
+        repeat(6) { step ->
             val r = rng.nextInt(8)
             val c = rng.nextInt(8)
-            // Keep center 3x3 (rows 2..4, cols 2..4) at least partially open if sparse
             if (grid[r][c] == 0) {
                 grid[r][c] = nextJewelColor(step + 3)
             }

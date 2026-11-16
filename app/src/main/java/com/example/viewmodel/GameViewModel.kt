@@ -10,7 +10,12 @@ import com.example.audio.SoundManager
 import com.example.data.GameFirestoreRepository
 import com.example.data.GamePreferences
 import com.example.data.LocalSessionStorage
+import com.example.model.Achievement
+import com.example.model.AchievementCatalog
 import com.example.model.BlockShape
+import com.example.model.DailyLoginRewardProfile
+import com.example.model.DailyLoginRewardSchedule
+import com.example.model.DailyLoginRewardTier
 import com.example.model.DailyMission
 import com.example.model.DailyMissionGenerator
 import com.example.model.DailyPuzzleGenerator
@@ -63,6 +68,7 @@ class GameViewModel(
     private val _gameState = MutableStateFlow(
         GameState(
             totalAllTimeScore = preferences.totalAllTimeScore,
+            playerOverallBestScore = computeLocalOverallBestScore(),
             isMusicEnabled = preferences.isMusicEnabled,
             isSoundEnabled = preferences.isSoundEnabled,
             isHapticsEnabled = preferences.isHapticsEnabled,
@@ -91,6 +97,8 @@ class GameViewModel(
     private var lastAppliedSessionTimestamp = 0L
     private var leaderboardJob: Job? = null
     private var globalLeaderboardJob: Job? = null
+    private var highScoreLeaderboardJob: Job? = null
+    private var loginRewardJob: Job? = null
     private var timeAttackJob: Job? = null
     private val _isTimeAttackPaused = MutableStateFlow(false)
 
@@ -148,6 +156,7 @@ class GameViewModel(
                     isGameOver = true,
                     gameOverReason = GameOverReason.TIME_UP,
                     highScore = bestScore,
+                    playerOverallBestScore = maxOf(it.playerOverallBestScore, bestScore),
                     isNewHighScore = it.isNewHighScore || isNewRecord,
                     isHammerActive = false,
                     selectedShapeIndex = null,
@@ -157,6 +166,9 @@ class GameViewModel(
                     prospectiveRows = emptySet(),
                     prospectiveCols = emptySet()
                 )
+            }
+            if (isNewRecord && current.score > 0) {
+                syncLocalBestScoreToCloud()
             }
             soundManager.playGameOver()
             triggerHaptic(HapticEffect.GameOver)
@@ -189,9 +201,18 @@ class GameViewModel(
         soundManager.isSoundEnabled = preferences.isSoundEnabled
         soundManager.isHapticsEnabled = preferences.isHapticsEnabled
         restoreSavedSessionOrStartNew()
+        refreshLoginRewardStateFromPreferences()
+        evaluateAndSyncAchievements(
+            currentScore = _gameState.value.score,
+            currentMaxCombo = _gameState.value.maxComboSession,
+            notifyUnlocks = false
+        )
         if (firestoreRepository != null && currentUserId.isNotBlank()) {
             observeDailyLeaderboard()
             observeGlobalLeaderboard()
+            observeHighScoreLeaderboard()
+            syncLocalBestScoreToCloud()
+            syncAndObserveDailyLoginReward()
         }
     }
 
@@ -323,16 +344,49 @@ class GameViewModel(
             isLeaderboardLoading = currentState.isLeaderboardLoading,
             leaderboardError = currentState.leaderboardError,
             totalAllTimeScore = preferences.totalAllTimeScore,
+            playerOverallBestScore = maxOf(currentState.playerOverallBestScore, computeLocalOverallBestScore(dateStr), savedHigh),
             globalLeaderboardEntries = currentState.globalLeaderboardEntries,
             isGlobalLeaderboardLoading = currentState.isGlobalLeaderboardLoading,
             globalLeaderboardError = currentState.globalLeaderboardError,
+            highScoreLeaderboardEntries = currentState.highScoreLeaderboardEntries,
+            isHighScoreLeaderboardLoading = currentState.isHighScoreLeaderboardLoading,
+            highScoreLeaderboardError = currentState.highScoreLeaderboardError,
             isMusicEnabled = preferences.isMusicEnabled,
             isSoundEnabled = preferences.isSoundEnabled,
             isHapticsEnabled = preferences.isHapticsEnabled,
+            dailyStreak = if (isDaily) {
+                preferences.recordDailyParticipation(dateStr, getYesterdayDateString())
+            } else {
+                preferences.dailyStreak
+            },
+            isDailyCompletedToday = preferences.isDailyDateCompleted(dateStr),
+            coinsBalance = preferences.coinsBalance,
+            loginStreak = DailyLoginRewardSchedule.computeActiveStreak(
+                lastClaimDate = preferences.lastLoginClaimDate,
+                storedStreak = preferences.loginStreak,
+                todayDate = dateStr,
+                yesterdayDate = getYesterdayDateString()
+            ),
+            longestLoginStreak = preferences.longestLoginStreak,
+            lastLoginClaimDate = preferences.lastLoginClaimDate,
+            canClaimDailyLoginReward = DailyLoginRewardSchedule.canClaimToday(preferences.lastLoginClaimDate, dateStr),
+            dailyLoginNextCycleDay = DailyLoginRewardSchedule.nextClaimCycleDay(
+                lastClaimDate = preferences.lastLoginClaimDate,
+                storedStreak = preferences.loginStreak,
+                todayDate = dateStr,
+                yesterdayDate = getYesterdayDateString()
+            ),
+            isDailyLoginLoading = currentState.isDailyLoginLoading,
+            dailyLoginError = currentState.dailyLoginError,
             currentUserId = currentUserId,
             currentUserDisplayName = currentUserDisplayName
         )
 
+        evaluateAndSyncAchievements(
+            currentScore = session.score,
+            currentMaxCombo = session.maxComboSession,
+            notifyUnlocks = false
+        )
         ensureTimeAttackTimer()
 
         if (showResumedBanner) {
@@ -428,6 +482,77 @@ class GameViewModel(
     }
 
     /**
+     * Observes the Global High Score Leaderboard (ordered by bestScore descending) in real time
+     * so players can compare their single-game high score against other players worldwide.
+     */
+    fun observeHighScoreLeaderboard() {
+        val repo = firestoreRepository ?: return
+        if (currentUserId.isBlank()) return
+        highScoreLeaderboardJob?.cancel()
+        _gameState.update {
+            it.copy(isHighScoreLeaderboardLoading = true, highScoreLeaderboardError = null)
+        }
+
+        highScoreLeaderboardJob = viewModelScope.launch {
+            repo.observeHighScoreLeaderboard()
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w(TAG, "Error observing high score leaderboard", rootError)
+                    _gameState.update {
+                        it.copy(
+                            isHighScoreLeaderboardLoading = false,
+                            highScoreLeaderboardError = rootError.message ?: "Unable to load high score rankings"
+                        )
+                    }
+                }
+                .collect { entries ->
+                    val cloudOwnBest = entries.firstOrNull { it.userId == currentUserId }?.bestScore?.toInt() ?: 0
+                    val localBest = computeLocalOverallBestScore()
+                    _gameState.update {
+                        it.copy(
+                            highScoreLeaderboardEntries = entries,
+                            playerOverallBestScore = maxOf(it.playerOverallBestScore, localBest, cloudOwnBest),
+                            isHighScoreLeaderboardLoading = false,
+                            highScoreLeaderboardError = null
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun computeLocalOverallBestScore(dateStr: String = getTodayDateString()): Int {
+        return maxOf(
+            preferences.highScore,
+            preferences.timeAttackHighScore,
+            preferences.getDailyHighScore(dateStr)
+        )
+    }
+
+    fun syncLocalBestScoreToCloud() {
+        val repo = firestoreRepository ?: return
+        if (currentUserId.isBlank()) return
+        val localBest = maxOf(computeLocalOverallBestScore(), _gameState.value.score)
+        val totalFloor = preferences.totalAllTimeScore
+        val linesFloor = preferences.totalLinesCleared.toLong()
+        val bestCombo = maxOf(preferences.highestCombo, _gameState.value.maxComboSession)
+        if (localBest <= 0 && totalFloor <= 0L) return
+
+        viewModelScope.launch {
+            repo.syncHighScoreProfile(
+                displayName = currentUserDisplayName,
+                bestSingleGameScore = localBest,
+                totalScoreFloor = totalFloor,
+                totalLinesFloor = linesFloor,
+                highestCombo = bestCombo
+            )
+        }
+    }
+
+    /**
      * Persists the active game session to both the local JSON file and Firestore.
      */
     fun flushSession(syncToCloud: Boolean = true) {
@@ -502,12 +627,18 @@ class GameViewModel(
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
     }
 
+    fun getYesterdayDateString(): String {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, -1)
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
+    }
+
     fun getTodayFormattedString(): String {
         return SimpleDateFormat("MMM d, yyyy", Locale.US).format(Date())
     }
 
     /**
-     * Initializes a new game for Classic or Daily Challenge mode.
+     * Initializes a new game for Classic, Time Attack, or Daily Challenge mode.
      * In Daily Challenge mode, generates the deterministic procedural 8x8 board layout.
      */
     fun startNewGame(
@@ -520,6 +651,10 @@ class GameViewModel(
         val dateStr = getTodayDateString()
         val dateFormatted = getTodayFormattedString()
         val seed = computeDailySeed()
+
+        if (isDaily) {
+            preferences.recordDailyParticipation(dateStr, getYesterdayDateString())
+        }
 
         val initialGrid = if (isDaily) {
             DailyPuzzleGenerator.generateInitialBoard(seed)
@@ -606,16 +741,45 @@ class GameViewModel(
             isLeaderboardLoading = currentState.isLeaderboardLoading,
             leaderboardError = currentState.leaderboardError,
             totalAllTimeScore = preferences.totalAllTimeScore,
+            playerOverallBestScore = maxOf(currentState.playerOverallBestScore, computeLocalOverallBestScore(dateStr), high),
             globalLeaderboardEntries = currentState.globalLeaderboardEntries,
             isGlobalLeaderboardLoading = currentState.isGlobalLeaderboardLoading,
             globalLeaderboardError = currentState.globalLeaderboardError,
+            highScoreLeaderboardEntries = currentState.highScoreLeaderboardEntries,
+            isHighScoreLeaderboardLoading = currentState.isHighScoreLeaderboardLoading,
+            highScoreLeaderboardError = currentState.highScoreLeaderboardError,
             isMusicEnabled = preferences.isMusicEnabled,
             isSoundEnabled = preferences.isSoundEnabled,
             isHapticsEnabled = preferences.isHapticsEnabled,
+            dailyStreak = preferences.dailyStreak,
+            isDailyCompletedToday = preferences.isDailyDateCompleted(dateStr),
+            coinsBalance = preferences.coinsBalance,
+            loginStreak = DailyLoginRewardSchedule.computeActiveStreak(
+                lastClaimDate = preferences.lastLoginClaimDate,
+                storedStreak = preferences.loginStreak,
+                todayDate = dateStr,
+                yesterdayDate = getYesterdayDateString()
+            ),
+            longestLoginStreak = preferences.longestLoginStreak,
+            lastLoginClaimDate = preferences.lastLoginClaimDate,
+            canClaimDailyLoginReward = DailyLoginRewardSchedule.canClaimToday(preferences.lastLoginClaimDate, dateStr),
+            dailyLoginNextCycleDay = DailyLoginRewardSchedule.nextClaimCycleDay(
+                lastClaimDate = preferences.lastLoginClaimDate,
+                storedStreak = preferences.loginStreak,
+                todayDate = dateStr,
+                yesterdayDate = getYesterdayDateString()
+            ),
+            isDailyLoginLoading = currentState.isDailyLoginLoading,
+            dailyLoginError = currentState.dailyLoginError,
             currentUserId = currentUserId,
             currentUserDisplayName = currentUserDisplayName
         )
 
+        evaluateAndSyncAchievements(
+            currentScore = 0,
+            currentMaxCombo = 0,
+            notifyUnlocks = false
+        )
         ensureTimeAttackTimer()
 
         if (isTimeAttack) {
@@ -1187,6 +1351,11 @@ class GameViewModel(
             preferences.totalAllTimeScore
         }
 
+        val overallBestAfterMove = maxOf(
+            currentState.playerOverallBestScore,
+            newHigh,
+            computeLocalOverallBestScore(currentState.dailyDate.ifEmpty { getTodayDateString() })
+        )
         _gameState.update {
             it.copy(
                 grid = frozenGrid,
@@ -1194,6 +1363,7 @@ class GameViewModel(
                 score = newScore,
                 highScore = newHigh,
                 totalAllTimeScore = updatedAllTimeTotal,
+                playerOverallBestScore = overallBestAfterMove,
                 comboStreak = if (totalLines > 0) newCombo else 0,
                 comboEventId = if (totalLines > 0) currentState.comboEventId + 1L else currentState.comboEventId,
                 lastClearedLinesCount = totalLines,
@@ -1223,21 +1393,39 @@ class GameViewModel(
             )
         }
 
+        val dailyDateStr = currentState.dailyDate.ifEmpty { getTodayDateString() }
+        var newlySolvedDaily = false
+        if (isDaily) {
+            preferences.recordDailyParticipation(dailyDateStr, getYesterdayDateString())
+            if (newScore >= currentState.dailyTargetScore) {
+                newlySolvedDaily = preferences.markDailyDateCompleted(dailyDateStr)
+            }
+        }
+
         if (isGameOver) {
             stopTimeAttackTimer()
             if (isDaily) {
-                preferences.recordDailyGame(currentState.dailyDate, newScore)
+                preferences.recordDailyGame(dailyDateStr, newScore)
             }
             soundManager.playGameOver()
             triggerHaptic(HapticEffect.GameOver)
+        } else if (newlySolvedDaily) {
+            soundManager.playPowerup()
+            triggerHaptic(HapticEffect.PowerUp)
+            _gameState.update {
+                it.copy(
+                    comboBannerText = "🎉 DAILY PUZZLE SOLVED! STREAK: ${preferences.dailyStreak}d",
+                    dailyStreak = preferences.dailyStreak,
+                    isDailyCompletedToday = true
+                )
+            }
         }
 
-        // Submit Daily Challenge score to global Firestore leaderboard on new record or completion
-        if (isDaily && (isNewRecord || isGameOver) && newScore > 0 && firestoreRepository != null && currentUserId.isNotBlank()) {
-            val dailyDate = currentState.dailyDate.ifEmpty { getTodayDateString() }
+        // Submit Daily Challenge score to global Firestore leaderboard on new record, solve, or completion
+        if (isDaily && (isNewRecord || isGameOver || newlySolvedDaily) && newScore > 0 && firestoreRepository != null && currentUserId.isNotBlank()) {
             viewModelScope.launch {
                 firestoreRepository.submitDailyScore(
-                    dateStr = dailyDate,
+                    dateStr = dailyDateStr,
                     displayName = currentUserDisplayName,
                     score = newScore,
                     linesCleared = updatedLines,
@@ -1246,9 +1434,9 @@ class GameViewModel(
             }
         }
 
-        // Increment All-Time Global Leaderboard score atomically in real time
+        // Increment All-Time Global Leaderboard score & sync single-game High Score in real time
         if (totalMovePoints > 0 && firestoreRepository != null && currentUserId.isNotBlank()) {
-            val bestSingleGame = maxOf(newHigh, preferences.highScore)
+            val bestSingleGame = maxOf(newHigh, computeLocalOverallBestScore(dailyDateStr))
             val bestAllTimeCombo = maxOf(updatedMaxCombo, preferences.highestCombo)
             viewModelScope.launch {
                 firestoreRepository.submitAllTimeScoreDelta(
@@ -1268,6 +1456,13 @@ class GameViewModel(
             recordMissionEvent(MissionType.REACH_COMBO, newCombo)
         }
         recordMissionEvent(MissionType.SCORE_POINTS, totalMovePoints)
+
+        // Evaluate & persist Achievements (10-Line Combo, High Scorer, Daily Streak, etc.)
+        evaluateAndSyncAchievements(
+            currentScore = newScore,
+            currentMaxCombo = updatedMaxCombo,
+            notifyUnlocks = true
+        )
 
         // Persist updated session locally and to Firestore
         flushSession(syncToCloud = true)
@@ -1573,12 +1768,358 @@ class GameViewModel(
         return true
     }
 
+    fun evaluateAndSyncAchievements(
+        currentScore: Int = _gameState.value.score,
+        currentMaxCombo: Int = _gameState.value.maxComboSession,
+        notifyUnlocks: Boolean = false
+    ): List<Achievement> {
+        val prevUnlocked = AchievementCatalog.definitions
+            .filter { preferences.isAchievementUnlocked(it.id) }
+            .map { it.id }
+            .toSet()
+        val prevProgress = AchievementCatalog.definitions
+            .associate { it.id to preferences.getAchievementProgress(it.id) }
+
+        val bestSingleRun = maxOf(
+            preferences.highScore,
+            preferences.timeAttackHighScore,
+            preferences.getDailyHighScore(getTodayDateString()),
+            currentScore
+        )
+        val evaluated = AchievementCatalog.evaluateAll(
+            maxCombo = maxOf(preferences.highestCombo, currentMaxCombo),
+            bestScore = bestSingleRun,
+            dailyStreak = preferences.dailyStreak,
+            totalLines = preferences.totalLinesCleared,
+            dailyCompletedCount = preferences.dailyChallengesCompleted,
+            previouslyUnlockedIds = prevUnlocked,
+            previousProgressById = prevProgress
+        )
+
+        val newlyUnlocked = mutableListOf<Achievement>()
+        for (ach in evaluated) {
+            if (ach.current > (prevProgress[ach.id] ?: 0)) {
+                preferences.setAchievementProgress(ach.id, ach.current)
+            }
+            if (ach.isUnlocked && ach.id !in prevUnlocked) {
+                preferences.setAchievementUnlocked(ach.id, true)
+                newlyUnlocked.add(ach)
+            }
+        }
+
+        val unlockedCount = evaluated.count { it.isUnlocked }
+        val todayStr = getTodayDateString()
+        val isSolvedToday = preferences.isDailyDateCompleted(todayStr)
+
+        if (notifyUnlocks && newlyUnlocked.isNotEmpty()) {
+            soundManager.playPowerup()
+            triggerHaptic(HapticEffect.PowerUp)
+            val unlockedTitle = newlyUnlocked.first().title
+            _gameState.update {
+                it.copy(
+                    achievements = evaluated,
+                    unlockedAchievementsCount = unlockedCount,
+                    dailyStreak = preferences.dailyStreak,
+                    isDailyCompletedToday = isSolvedToday,
+                    comboBannerText = "🏅 ACHIEVEMENT: $unlockedTitle!"
+                )
+            }
+        } else {
+            _gameState.update {
+                it.copy(
+                    achievements = evaluated,
+                    unlockedAchievementsCount = unlockedCount,
+                    dailyStreak = preferences.dailyStreak,
+                    isDailyCompletedToday = isSolvedToday
+                )
+            }
+        }
+        return evaluated
+    }
+
+    private fun buildLocalLoginProfile(): DailyLoginRewardProfile {
+        return DailyLoginRewardProfile(
+            id = "daily_login",
+            userId = currentUserId,
+            loginStreak = preferences.loginStreak.toLong(),
+            longestLoginStreak = preferences.longestLoginStreak.toLong(),
+            lastClaimDate = preferences.lastLoginClaimDate,
+            totalDaysClaimed = preferences.totalLoginDaysClaimed.toLong(),
+            coinsBalance = preferences.coinsBalance.toLong(),
+            totalCoinsEarned = preferences.totalCoinsEarned.toLong(),
+            totalHammersEarned = preferences.totalLoginHammersEarned.toLong()
+        )
+    }
+
+    private fun refreshLoginRewardStateFromPreferences() {
+        val today = getTodayDateString()
+        val yesterday = getYesterdayDateString()
+        val lastDate = preferences.lastLoginClaimDate
+        val storedStreak = preferences.loginStreak
+        val activeStreak = DailyLoginRewardSchedule.computeActiveStreak(lastDate, storedStreak, today, yesterday)
+        val canClaim = DailyLoginRewardSchedule.canClaimToday(lastDate, today)
+        val nextDay = DailyLoginRewardSchedule.nextClaimCycleDay(lastDate, storedStreak, today, yesterday)
+
+        _gameState.update {
+            it.copy(
+                coinsBalance = preferences.coinsBalance,
+                loginStreak = activeStreak,
+                longestLoginStreak = maxOf(preferences.longestLoginStreak, activeStreak),
+                lastLoginClaimDate = lastDate,
+                canClaimDailyLoginReward = canClaim,
+                dailyLoginNextCycleDay = nextDay
+            )
+        }
+    }
+
+    private fun applyCloudLoginProfile(profile: DailyLoginRewardProfile) {
+        val today = getTodayDateString()
+        val yesterday = getYesterdayDateString()
+        val cloudHammersTotal = profile.totalHammersEarned.toInt().coerceAtLeast(0)
+        val hammerDelta = (cloudHammersTotal - preferences.totalLoginHammersEarned).coerceAtLeast(0)
+        if (hammerDelta > 0) {
+            preferences.hammerCount = preferences.hammerCount + hammerDelta
+            preferences.totalLoginHammersEarned = cloudHammersTotal
+        } else if (cloudHammersTotal > preferences.totalLoginHammersEarned) {
+            preferences.totalLoginHammersEarned = cloudHammersTotal
+        }
+
+        preferences.coinsBalance = profile.coinsBalance.toInt().coerceAtLeast(0)
+        preferences.loginStreak = profile.loginStreak.toInt().coerceAtLeast(0)
+        preferences.longestLoginStreak = maxOf(
+            preferences.longestLoginStreak,
+            profile.longestLoginStreak.toInt().coerceAtLeast(0)
+        )
+        preferences.lastLoginClaimDate = profile.lastClaimDate
+        preferences.totalLoginDaysClaimed = maxOf(
+            preferences.totalLoginDaysClaimed,
+            profile.totalDaysClaimed.toInt().coerceAtLeast(0)
+        )
+        preferences.totalCoinsEarned = maxOf(
+            preferences.totalCoinsEarned,
+            profile.totalCoinsEarned.toInt().coerceAtLeast(0)
+        )
+
+        val activeStreak = DailyLoginRewardSchedule.computeActiveStreak(
+            lastClaimDate = profile.lastClaimDate,
+            storedStreak = profile.loginStreak.toInt(),
+            todayDate = today,
+            yesterdayDate = yesterday
+        )
+        val canClaim = DailyLoginRewardSchedule.canClaimToday(profile.lastClaimDate, today)
+        val nextDay = DailyLoginRewardSchedule.nextClaimCycleDay(
+            lastClaimDate = profile.lastClaimDate,
+            storedStreak = profile.loginStreak.toInt(),
+            todayDate = today,
+            yesterdayDate = yesterday
+        )
+
+        _gameState.update {
+            it.copy(
+                hammerCount = preferences.hammerCount,
+                coinsBalance = preferences.coinsBalance,
+                loginStreak = activeStreak,
+                longestLoginStreak = preferences.longestLoginStreak,
+                lastLoginClaimDate = profile.lastClaimDate,
+                canClaimDailyLoginReward = canClaim,
+                dailyLoginNextCycleDay = nextDay,
+                isDailyLoginLoading = false,
+                dailyLoginError = null
+            )
+        }
+    }
+
+    private fun syncAndObserveDailyLoginReward() {
+        val repo = firestoreRepository ?: return
+        if (currentUserId.isBlank()) return
+        loginRewardJob?.cancel()
+
+        viewModelScope.launch {
+            val localProfile = buildLocalLoginProfile()
+            if (localProfile.totalDaysClaimed > 0L || localProfile.coinsBalance > 0L) {
+                repo.syncDailyLoginRewardProfile(localProfile).getOrNull()?.let { synced ->
+                    applyCloudLoginProfile(synced)
+                }
+            }
+        }
+
+        loginRewardJob = viewModelScope.launch {
+            repo.observeDailyLoginReward()
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w(TAG, "Error observing daily login reward", rootError)
+                    _gameState.update {
+                        it.copy(
+                            isDailyLoginLoading = false,
+                            dailyLoginError = rootError.message ?: "Unable to sync daily rewards"
+                        )
+                    }
+                }
+                .collect { profile ->
+                    if (profile != null) {
+                        applyCloudLoginProfile(profile)
+                    } else {
+                        refreshLoginRewardStateFromPreferences()
+                    }
+                }
+        }
+    }
+
+    private fun formatLoginRewardBanner(tier: DailyLoginRewardTier): String {
+        val parts = mutableListOf<String>()
+        if (tier.coins > 0) parts.add("+${tier.coins} 🪙")
+        if (tier.hammers > 0) parts.add("+${tier.hammers} 🔨")
+        return "DAY ${tier.cycleDay} BONUS: ${parts.joinToString(" & ")}!"
+    }
+
+    fun claimDailyLoginReward() {
+        val current = _gameState.value
+        val today = getTodayDateString()
+        val yesterday = getYesterdayDateString()
+        if (current.isDailyLoginLoading) return
+        if (!DailyLoginRewardSchedule.canClaimToday(preferences.lastLoginClaimDate, today)) {
+            refreshLoginRewardStateFromPreferences()
+            return
+        }
+
+        val repo = firestoreRepository
+        if (repo == null || currentUserId.isBlank()) {
+            val nextStreak = DailyLoginRewardSchedule.computeNextStreak(
+                lastClaimDate = preferences.lastLoginClaimDate,
+                storedStreak = preferences.loginStreak,
+                todayDate = today,
+                yesterdayDate = yesterday
+            )
+            val tier = DailyLoginRewardSchedule.tierForStreak(nextStreak)
+            val nextLongest = maxOf(preferences.longestLoginStreak, nextStreak)
+            val nextTotalDays = preferences.totalLoginDaysClaimed + 1
+            val nextCoins = preferences.coinsBalance + tier.coins
+            val nextTotalCoins = preferences.totalCoinsEarned + tier.coins
+            val nextTotalHammers = preferences.totalLoginHammersEarned + tier.hammers
+            val nextHammerCount = preferences.hammerCount + tier.hammers
+
+            preferences.loginStreak = nextStreak
+            preferences.longestLoginStreak = nextLongest
+            preferences.lastLoginClaimDate = today
+            preferences.totalLoginDaysClaimed = nextTotalDays
+            preferences.coinsBalance = nextCoins
+            preferences.totalCoinsEarned = nextTotalCoins
+            preferences.totalLoginHammersEarned = nextTotalHammers
+            preferences.hammerCount = nextHammerCount
+
+            soundManager.playPowerup()
+            triggerHaptic(HapticEffect.PowerUp)
+
+            _gameState.update {
+                it.copy(
+                    hammerCount = nextHammerCount,
+                    coinsBalance = nextCoins,
+                    loginStreak = nextStreak,
+                    longestLoginStreak = nextLongest,
+                    lastLoginClaimDate = today,
+                    canClaimDailyLoginReward = false,
+                    dailyLoginNextCycleDay = tier.cycleDay,
+                    isDailyLoginLoading = false,
+                    dailyLoginError = null,
+                    comboBannerText = formatLoginRewardBanner(tier)
+                )
+            }
+            flushSession(syncToCloud = false)
+
+            viewModelScope.launch {
+                delay(1800)
+                _gameState.update { it.copy(comboBannerText = null) }
+            }
+            return
+        }
+
+        _gameState.update { it.copy(isDailyLoginLoading = true, dailyLoginError = null) }
+        val seedProfile = buildLocalLoginProfile()
+        viewModelScope.launch {
+            val result = repo.claimDailyLoginReward(
+                todayDate = today,
+                yesterdayDate = yesterday,
+                localSeed = seedProfile
+            )
+            result.onSuccess { claimResult ->
+                applyCloudLoginProfile(claimResult.profile)
+                val grantedTier = claimResult.grantedTier
+                if (claimResult.claimed && grantedTier != null) {
+                    soundManager.playPowerup()
+                    triggerHaptic(HapticEffect.PowerUp)
+                    _gameState.update {
+                        it.copy(comboBannerText = formatLoginRewardBanner(grantedTier))
+                    }
+                    flushSession(syncToCloud = true)
+                    delay(1800)
+                    _gameState.update { it.copy(comboBannerText = null) }
+                }
+            }.onFailure { error ->
+                _gameState.update {
+                    it.copy(
+                        isDailyLoginLoading = false,
+                        dailyLoginError = error.message ?: "Unable to claim daily reward"
+                    )
+                }
+            }
+        }
+    }
+
+    fun exchangeCoinsForHammer(costCoins: Int = DailyLoginRewardSchedule.COIN_TO_HAMMER_COST): Boolean {
+        val current = _gameState.value
+        if (current.coinsBalance < costCoins || preferences.coinsBalance < costCoins) {
+            return false
+        }
+        val nextCoins = (preferences.coinsBalance - costCoins).coerceAtLeast(0)
+        val nextHammers = preferences.hammerCount + 1
+        preferences.coinsBalance = nextCoins
+        preferences.hammerCount = nextHammers
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        _gameState.update {
+            it.copy(
+                coinsBalance = nextCoins,
+                hammerCount = nextHammers,
+                dailyLoginError = null,
+                comboBannerText = "+1 🔨 CRAFTED!"
+            )
+        }
+        flushSession(syncToCloud = true)
+
+        val repo = firestoreRepository
+        if (repo != null && currentUserId.isNotBlank()) {
+            viewModelScope.launch {
+                val spendResult = repo.spendCoinsForHammer(costCoins)
+                if (spendResult.isFailure) {
+                    // Ensure guest-earned coins already synced to Firestore also reflect the spend
+                    repo.syncDailyLoginRewardProfile(buildLocalLoginProfile())
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            delay(1500)
+            _gameState.update {
+                if (it.comboBannerText == "+1 🔨 CRAFTED!") it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
     override fun onCleared() {
         super.onCleared()
         soundManager.setMusicForegrounded(false)
         stopTimeAttackTimer()
         leaderboardJob?.cancel()
         globalLeaderboardJob?.cancel()
+        highScoreLeaderboardJob?.cancel()
+        loginRewardJob?.cancel()
     }
 
     companion object {

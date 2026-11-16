@@ -229,6 +229,217 @@ class GameFirestoreRepositoryRuleTest : FirestoreEmulatorTestBase() {
         assertTrue(repoResult.isFailure)
     }
 
+    @Test
+    fun observeHighScoreLeaderboard_authenticatedUsers_ranksByBestScoreAndSyncsProfile() = runBlocking {
+        // Alice has higher cumulative totalScore (4000) but lower single-game bestScore (1200)
+        val aliceUid = signInTestUser(ALICE_EMAIL)
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            firestore.collection("global_leaderboard").document(aliceUid).delete().await()
+        }
+        val aliceRepo = GameFirestoreRepository(firestore, auth)
+        val syncAlice = withTimeout(DEFAULT_TIMEOUT_MS) {
+            aliceRepo.syncHighScoreProfile(
+                displayName = "Alice",
+                bestSingleGameScore = 1200,
+                totalScoreFloor = 4000L,
+                totalLinesFloor = 25L,
+                highestCombo = 3
+            )
+        }
+        assertTrue("syncAlice failed: ${syncAlice.exceptionOrNull()?.stackTraceToString()}", syncAlice.isSuccess)
+
+        // Bob has lower totalScore (2500) but higher single-game bestScore (2500)
+        val bobUid = signInTestUser(BOB_EMAIL)
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            firestore.collection("global_leaderboard").document(bobUid).delete().await()
+        }
+        val bobRepo = GameFirestoreRepository(firestore, auth)
+        val syncBob = withTimeout(DEFAULT_TIMEOUT_MS) {
+            bobRepo.syncHighScoreProfile(
+                displayName = "Bob",
+                bestSingleGameScore = 2500,
+                totalScoreFloor = 2500L,
+                totalLinesFloor = 18L,
+                highestCombo = 5
+            )
+        }
+        assertTrue("syncBob failed: ${syncBob.exceptionOrNull()?.stackTraceToString()}", syncBob.isSuccess)
+
+        val rankedByBestScore = withTimeout(FLOW_TIMEOUT_MS) {
+            bobRepo.observeHighScoreLeaderboard().first { list ->
+                list.any { it.userId == aliceUid } && list.any { it.userId == bobUid }
+            }
+        }
+        val bobIndex = rankedByBestScore.indexOfFirst { it.userId == bobUid }
+        val aliceIndex = rankedByBestScore.indexOfFirst { it.userId == aliceUid }
+        assertTrue(
+            "Bob (bestScore 2500) should rank ahead of Alice (bestScore 1200) even with lower totalScore",
+            bobIndex in 0 until aliceIndex
+        )
+        assertEquals(2500L, rankedByBestScore[bobIndex].bestScore)
+        assertEquals(1200L, rankedByBestScore[aliceIndex].bestScore)
+    }
+
+    @Test
+    fun observeHighScoreLeaderboard_unauthenticatedUser_failsWithPermissionDenied() = runBlocking {
+        auth.signOut()
+        val repo = GameFirestoreRepository(firestore, auth)
+
+        val exception = try {
+            withTimeout(FLOW_TIMEOUT_MS) {
+                firestore.collection("global_leaderboard")
+                    .whereGreaterThanOrEqualTo("bestScore", 0)
+                    .get()
+                    .await()
+            }
+            null
+        } catch (e: Exception) {
+            e
+        }
+        assertNotNull(exception)
+        val firestoreErr = exception?.unwrapFirestoreException()
+        assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, firestoreErr?.code)
+
+        val repoResult = withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.syncHighScoreProfile("Anon", bestSingleGameScore = 900)
+        }
+        assertTrue(repoResult.isFailure)
+    }
+
+    @Test
+    fun claimDailyLoginReward_consecutiveDays_advancesStreakAndPreventsDuplicateSameDay() = runBlocking {
+        val aliceUid = signInTestUser(ALICE_EMAIL)
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            firestore.collection("users").document(aliceUid)
+                .collection("rewards").document("daily_login").delete().await()
+        }
+        val repo = GameFirestoreRepository(firestore, auth)
+
+        // Day 1 claim (+50 Coins)
+        val day1 = withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.claimDailyLoginReward(todayDate = "2026-11-12", yesterdayDate = "2026-11-11")
+        }.getOrThrow()
+        assertTrue(day1.claimed)
+        assertEquals(1, day1.grantedTier?.cycleDay)
+        assertEquals(1L, day1.profile.loginStreak)
+        assertEquals(1L, day1.profile.longestLoginStreak)
+        assertEquals(50L, day1.profile.coinsBalance)
+        assertEquals(50L, day1.profile.totalCoinsEarned)
+
+        // Duplicate claim on the same day must be a no-op
+        val duplicate = withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.claimDailyLoginReward(todayDate = "2026-11-12", yesterdayDate = "2026-11-11")
+        }.getOrThrow()
+        assertEquals(false, duplicate.claimed)
+        assertEquals(50L, duplicate.profile.coinsBalance)
+        assertEquals(1L, duplicate.profile.totalDaysClaimed)
+
+        // Consecutive Day 2 claim (+1 Hammer)
+        val day2 = withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.claimDailyLoginReward(todayDate = "2026-11-13", yesterdayDate = "2026-11-12")
+        }.getOrThrow()
+        assertTrue(day2.claimed)
+        assertEquals(2, day2.grantedTier?.cycleDay)
+        assertEquals(2L, day2.profile.loginStreak)
+        assertEquals(2L, day2.profile.longestLoginStreak)
+        assertEquals(2L, day2.profile.totalDaysClaimed)
+        assertEquals(1L, day2.profile.totalHammersEarned)
+
+        val observed = withTimeout(FLOW_TIMEOUT_MS) {
+            repo.observeDailyLoginReward().first { it != null && it.loginStreak == 2L }
+        }
+        assertNotNull(observed)
+        assertEquals("2026-11-13", observed?.lastClaimDate)
+    }
+
+    @Test
+    fun claimDailyLoginReward_missedDayAndCoinSpend_preservesMonotonicTotals() = runBlocking {
+        val aliceUid = signInTestUser(ALICE_EMAIL)
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            firestore.collection("users").document(aliceUid)
+                .collection("rewards").document("daily_login").delete().await()
+        }
+        val repo = GameFirestoreRepository(firestore, auth)
+
+        // 3 consecutive days: Day 1 (+50), Day 2 (+1 hammer), Day 3 (+100) -> 150 coins
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.claimDailyLoginReward("2026-11-10", "2026-11-09").getOrThrow()
+            repo.claimDailyLoginReward("2026-11-11", "2026-11-10").getOrThrow()
+            repo.claimDailyLoginReward("2026-11-12", "2026-11-11").getOrThrow()
+        }
+
+        val spentRemaining = withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.spendCoinsForHammer(100)
+        }.getOrThrow()
+        assertEquals(50L, spentRemaining)
+
+        // Miss 2 days -> streak resets to 1, longest stays 3, totalDaysClaimed becomes 4
+        val afterGap = withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.claimDailyLoginReward("2026-11-15", "2026-11-14")
+        }.getOrThrow()
+        assertTrue(afterGap.claimed)
+        assertEquals(1L, afterGap.profile.loginStreak)
+        assertEquals(3L, afterGap.profile.longestLoginStreak)
+        assertEquals(4L, afterGap.profile.totalDaysClaimed)
+        assertEquals(100L, afterGap.profile.coinsBalance)
+        assertEquals(200L, afterGap.profile.totalCoinsEarned)
+    }
+
+    @Test
+    fun dailyLoginReward_crossUserAndUnauthenticatedAccess_failsWithPermissionDenied() = runBlocking {
+        val aliceUid = signInTestUser(ALICE_EMAIL)
+        val aliceRepo = GameFirestoreRepository(firestore, auth)
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            aliceRepo.claimDailyLoginReward("2026-11-13", "2026-11-12").getOrThrow()
+        }
+
+        // Bob tries to read Alice's private reward profile
+        signInTestUser(BOB_EMAIL)
+        val crossUserErr = try {
+            withTimeout(DEFAULT_TIMEOUT_MS) {
+                firestore.collection("users")
+                    .document(aliceUid)
+                    .collection("rewards")
+                    .document("daily_login")
+                    .get()
+                    .await()
+            }
+            null
+        } catch (e: Exception) {
+            e
+        }
+        assertNotNull(crossUserErr)
+        assertEquals(
+            FirebaseFirestoreException.Code.PERMISSION_DENIED,
+            crossUserErr?.unwrapFirestoreException()?.code
+        )
+
+        // Unauthenticated client
+        auth.signOut()
+        val unauthErr = try {
+            withTimeout(DEFAULT_TIMEOUT_MS) {
+                firestore.collection("users")
+                    .document(aliceUid)
+                    .collection("rewards")
+                    .document("daily_login")
+                    .get()
+                    .await()
+            }
+            null
+        } catch (e: Exception) {
+            e
+        }
+        assertNotNull(unauthErr)
+        assertEquals(
+            FirebaseFirestoreException.Code.PERMISSION_DENIED,
+            unauthErr?.unwrapFirestoreException()?.code
+        )
+        val repoResult = withTimeout(DEFAULT_TIMEOUT_MS) {
+            aliceRepo.claimDailyLoginReward("2026-11-14", "2026-11-13")
+        }
+        assertTrue(repoResult.isFailure)
+    }
+
     private companion object {
         const val ALICE_EMAIL = "alice_blockblast@test.com"
         const val BOB_EMAIL = "bob_blockblast@test.com"

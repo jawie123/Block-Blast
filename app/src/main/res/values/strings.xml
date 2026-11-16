@@ -8,4 +8,10 @@
     <string name="settings_sfx_desc">Placements, clears &amp; combos</string>
     <string name="settings_haptics_label">Haptic Feedback</string>
     <string name="settings_haptics_desc">Tactile vibration on moves</string>
+    <string name="achievements_section_title">ACHIEVEMENTS</string>
+    <string name="achievements_section_subtitle">Player Milestones</string>
+    <string name="auth_continue_as_guest">Continue as Guest</string>
+    <string name="auth_guest_hint">Play offline with local saves • Sign in anytime for cloud sync</string>
+    <string name="guest_badge">GUEST</string>
+    <string name="guest_leaderboard_prompt">Sign in with Google to save scores to the cloud and compete on the live rankings!</string>
 </resources>

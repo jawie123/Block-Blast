@@ -3,6 +3,7 @@ package com.example.ui.components
 import android.app.Activity
 import android.content.Context
 import android.util.Log
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -18,16 +19,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -83,7 +90,13 @@ fun attemptAutoSignIn(
     onUnauthenticated: () -> Unit,
     scope: CoroutineScope
 ) {
-    if (Firebase.auth.currentUser != null) {
+    val alreadySignedIn = try {
+        Firebase.auth.currentUser != null
+    } catch (e: Exception) {
+        Log.w(AUTH_TAG, "FirebaseAuth unavailable during auto sign-in check: ${e.message}")
+        false
+    }
+    if (alreadySignedIn) {
         onAuthSuccess()
         return
     }
@@ -195,6 +208,7 @@ fun signOut(
 @Composable
 fun AuthScreen(
     onAuthSuccess: () -> Unit,
+    onContinueAsGuest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -226,7 +240,7 @@ fun AuthScreen(
             .background(DarkBackground)
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(24.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp)
             .testTag("auth_screen"),
         contentAlignment = Alignment.Center
     ) {
@@ -237,7 +251,8 @@ fun AuthScreen(
                 .clip(RoundedCornerShape(24.dp))
                 .background(BoardBackground)
                 .border(1.5.dp, BoardBorder, RoundedCornerShape(24.dp))
-                .padding(28.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Neon 8x8 Emblem
@@ -378,6 +393,71 @@ fun AuthScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = BoardBorder
+                )
+                Text(
+                    text = "OR",
+                    fontSize = 10.sp,
+                    color = Color(0xFF7B87A0),
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = BoardBorder
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            OutlinedButton(
+                onClick = onContinueAsGuest,
+                enabled = !isLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .testTag("guest_sign_in_button"),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.5.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = Color(0xFF10182C),
+                    contentColor = Color(0xFF00E5FF)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PersonOutline,
+                    contentDescription = null,
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = stringResource(R.string.auth_continue_as_guest),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.3.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = stringResource(R.string.auth_guest_hint),
+                color = Color(0xFF7B87A0),
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 15.sp
+            )
         }
     }
 }
