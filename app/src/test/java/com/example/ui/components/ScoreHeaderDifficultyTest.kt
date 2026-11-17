@@ -27,6 +27,8 @@ class ScoreHeaderDifficultyTest {
         var level by mutableIntStateOf(1)
         var title by mutableStateOf("STARTER")
         var nextScore by mutableStateOf<Int?>(500)
+        var unlockedVariety by mutableIntStateOf(com.example.model.ShapeDefinitions.getUnlockedVarietyCount(0))
+        val totalVariety = com.example.model.ShapeDefinitions.totalShapeVarietyCount
 
         composeTestRule.setContent {
             ScoreHeader(
@@ -39,6 +41,8 @@ class ScoreHeaderDifficultyTest {
                 difficultyTitle = title,
                 difficultyProgress = 0.5f,
                 nextDifficultyScore = nextScore,
+                unlockedShapeVariety = unlockedVariety,
+                totalShapeVariety = totalVariety,
                 onToggleSound = {},
                 onToggleHaptics = {},
                 onShowStats = {},
@@ -49,15 +53,19 @@ class ScoreHeaderDifficultyTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("difficulty_badge").assertIsDisplayed()
         composeTestRule.onNodeWithTag("difficulty_badge").assertTextEquals("LV 1 STARTER")
+        composeTestRule.onNodeWithTag("difficulty_shape_variety_badge", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("${unlockedVariety}/${totalVariety}", useUnmergedTree = true).assertIsDisplayed()
         composeTestRule.onNodeWithText("NEXT 500").assertIsDisplayed()
 
         composeTestRule.runOnUiThread {
             level = 5
             title = "GRANDMASTER"
             nextScore = null
+            unlockedVariety = totalVariety
         }
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("difficulty_badge").assertTextEquals("LV 5 GRANDMASTER")
+        composeTestRule.onNodeWithText("${totalVariety}/${totalVariety}", useUnmergedTree = true).assertIsDisplayed()
         composeTestRule.onNodeWithText("MAX TIER").assertIsDisplayed()
     }
 }

@@ -70,8 +70,12 @@ fun DailyLoginRewardDialog(
     isLoading: Boolean = false,
     errorMessage: String? = null,
     isGuestMode: Boolean = false,
+    isRewardedAdReady: Boolean = false,
+    isRewardedAdLoading: Boolean = false,
+    isAdShowing: Boolean = false,
     onClaimToday: () -> Unit,
     onExchangeCoinsForHammer: () -> Unit,
+    onWatchAdForHammer: () -> Unit = {},
     onSignInWithGoogle: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
@@ -382,6 +386,35 @@ fun DailyLoginRewardDialog(
                 ) {
                     Text(
                         text = "🔨 CRAFT +1 HAMMER ($exchangeCost 🪙)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Rewarded Ad: Earn +1 Free Hammer
+                OutlinedButton(
+                    onClick = onWatchAdForHammer,
+                    enabled = !isLoading && !isAdShowing,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .testTag("watch_ad_free_hammer_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFFB300)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color(0x1AFFB300),
+                        contentColor = Color(0xFFFFB300)
+                    )
+                ) {
+                    Text(
+                        text = if (!isRewardedAdReady && isRewardedAdLoading) {
+                            "🔨 +1 FREE HAMMER • LOADING AD..."
+                        } else {
+                            "🔨 +1 FREE HAMMER • WATCH AD"
+                        },
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1

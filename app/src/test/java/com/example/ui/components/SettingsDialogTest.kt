@@ -180,4 +180,59 @@ class SettingsDialogTest {
         composeTestRule.onNodeWithTag("daily_target_status", useUnmergedTree = true).assertIsDisplayed()
         composeTestRule.onNodeWithText("✅ SOLVED", useUnmergedTree = true).assertIsDisplayed()
     }
+
+    @Test
+    fun `quick gameplay sound and haptics toggles update state and sync with settings dialog`() {
+        var showSettings by mutableStateOf(false)
+        var soundEnabled by mutableStateOf(true)
+        var hapticsEnabled by mutableStateOf(true)
+
+        composeTestRule.setContent {
+            ScoreHeader(
+                score = 240,
+                highScore = 800,
+                comboStreak = 0,
+                isSoundEnabled = soundEnabled,
+                isHapticsEnabled = hapticsEnabled,
+                onToggleSound = { soundEnabled = !soundEnabled },
+                onToggleHaptics = { hapticsEnabled = !hapticsEnabled },
+                onShowSettings = { showSettings = true },
+                onShowStats = {},
+                onRestart = {}
+            )
+
+            if (showSettings) {
+                SettingsDialog(
+                    isMusicEnabled = true,
+                    isSoundEnabled = soundEnabled,
+                    isHapticsEnabled = hapticsEnabled,
+                    onToggleMusic = {},
+                    onToggleSound = { soundEnabled = !soundEnabled },
+                    onToggleHaptics = { hapticsEnabled = !hapticsEnabled },
+                    onDismiss = { showSettings = false }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("quick_sfx_toggle").assertIsDisplayed().performClick()
+        composeTestRule.onNodeWithTag("quick_haptics_toggle").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        assertFalse(soundEnabled)
+        assertFalse(hapticsEnabled)
+
+        // Open SettingsDialog and verify both switches reflect disabled state, then re-enable via Settings
+        composeTestRule.onNodeWithTag("settings_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("settings_sfx_switch").assertIsOff().performClick()
+        composeTestRule.onNodeWithTag("settings_haptics_switch").assertIsOff().performClick()
+        composeTestRule.waitForIdle()
+
+        assertTrue(soundEnabled)
+        assertTrue(hapticsEnabled)
+        composeTestRule.onNodeWithTag("settings_sfx_switch").assertIsOn()
+        composeTestRule.onNodeWithTag("settings_haptics_switch").assertIsOn()
+    }
 }

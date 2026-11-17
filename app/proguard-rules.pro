@@ -12,10 +12,14 @@
 #   public *;
 #}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Preserve line number information for Play Console crash/ANR deobfuscation
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Preserve Firestore POJOs and Kotlin data classes deserialized via reflection (toObject / toObjects)
+-keepattributes RuntimeVisibleAnnotations,Signature
+-keep class com.example.model.** { *; }
+-keepclassmembers class com.example.model.** {
+    *;
+}
+

@@ -239,41 +239,66 @@ class ExampleRobolectricTest {
         val testDate = "2026-11-12"
 
         val missions = com.example.model.DailyMissionGenerator.generateMissionsForDate(testDate)
-        assertEquals(3, missions.size)
-        // Deterministic: generated twice for same date gives identical mission IDs and targets
+        assertEquals(4, missions.size)
+        assertTrue(missions.any { it.type == com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE && it.target == 3 })
+        assertTrue(missions.any { it.type == com.example.model.MissionType.SCORE_POINTS && it.target == 1000 })
+        assertTrue(missions.all { it.coinReward > 0 })
+
+        // Deterministic: generated twice for same date gives identical mission IDs, targets, and rewards
         val missionsAgain = com.example.model.DailyMissionGenerator.generateMissionsForDate(testDate)
-        for (i in 0 until 3) {
+        for (i in missions.indices) {
             assertEquals(missions[i].id, missionsAgain[i].id)
             assertEquals(missions[i].type, missionsAgain[i].type)
             assertEquals(missions[i].target, missionsAgain[i].target)
+            assertEquals(missions[i].coinReward, missionsAgain[i].coinReward)
             assertEquals(missions[i].hammerReward, missionsAgain[i].hammerReward)
         }
 
         val soundManager = com.example.audio.SoundManager(context)
         prefs.hammerCount = 2
+        prefs.coinsBalance = 25
+        prefs.totalCoinsEarned = 25
         val viewModel = com.example.viewmodel.GameViewModel(context, soundManager, prefs)
 
-        val firstMission = viewModel.gameState.value.dailyMissions.first()
-        assertFalse(firstMission.isCompleted)
-        assertFalse(firstMission.isClaimed)
+        val singleMoveMission = viewModel.gameState.value.dailyMissions
+            .first { it.type == com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE }
+        assertFalse(singleMoveMission.isCompleted)
+        assertFalse(singleMoveMission.isClaimed)
 
-        // Progress the mission to completion
-        viewModel.recordMissionEvent(firstMission.type, firstMission.target)
+        // Clearing 1 line across separate moves must NOT accumulate to 3 for single-move objective
+        viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 1)
+        viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 1)
+        val afterSingleLines = viewModel.gameState.value.dailyMissions.first { it.id == singleMoveMission.id }
+        assertEquals(1, afterSingleLines.current)
+        assertFalse(afterSingleLines.isCompleted)
+
+        // Clearing 3 lines in one move completes the mission
+        viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 3)
         val stateAfterEvent = viewModel.gameState.value
-        val updatedMission = stateAfterEvent.dailyMissions.first { it.id == firstMission.id }
+        val updatedMission = stateAfterEvent.dailyMissions.first { it.id == singleMoveMission.id }
         assertTrue(updatedMission.isCompleted)
         assertFalse(updatedMission.isClaimed)
         assertTrue(stateAfterEvent.unclaimedMissionsCount >= 1)
 
-        // Claim reward
+        // Reaching 1000 points completes the score milestone
+        viewModel.recordMissionEvent(com.example.model.MissionType.SCORE_POINTS, 1000)
+        val scoreMission = viewModel.gameState.value.dailyMissions
+            .first { it.type == com.example.model.MissionType.SCORE_POINTS }
+        assertTrue(scoreMission.isCompleted)
+
+        // Claim reward grants both bonus coins and hammer reward
+        val initialCoins = stateAfterEvent.coinsBalance
         val initialHammers = stateAfterEvent.hammerCount
-        val claimed = viewModel.claimMissionReward(firstMission.id)
+        val claimed = viewModel.claimMissionReward(singleMoveMission.id)
         assertTrue(claimed)
 
         val stateAfterClaim = viewModel.gameState.value
-        assertEquals(initialHammers + firstMission.hammerReward, stateAfterClaim.hammerCount)
-        assertEquals(initialHammers + firstMission.hammerReward, prefs.hammerCount)
-        assertTrue(stateAfterClaim.dailyMissions.first { it.id == firstMission.id }.isClaimed)
+        assertEquals(initialCoins + singleMoveMission.coinReward, stateAfterClaim.coinsBalance)
+        assertEquals(initialCoins + singleMoveMission.coinReward, prefs.coinsBalance)
+        assertEquals(25 + singleMoveMission.coinReward, prefs.totalCoinsEarned)
+        assertEquals(initialHammers + singleMoveMission.hammerReward, stateAfterClaim.hammerCount)
+        assertEquals(initialHammers + singleMoveMission.hammerReward, prefs.hammerCount)
+        assertTrue(stateAfterClaim.dailyMissions.first { it.id == singleMoveMission.id }.isClaimed)
     }
 
     @Test

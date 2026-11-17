@@ -1,7 +1,9 @@
 package com.example
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ads.AdMobRewardedCoordinator
+import com.example.ads.RewardedAdController
 import com.example.audio.SoundManager
 import com.example.data.GameFirestoreRepository
 import com.example.data.GamePreferences
@@ -37,10 +41,15 @@ class MainActivity : ComponentActivity() {
     private val soundManager by lazy { SoundManager(applicationContext) }
     private val preferences by lazy { GamePreferences(applicationContext) }
     private val localSessionStorage by lazy { LocalSessionStorage(applicationContext) }
+    private val adCoordinator by lazy { AdMobRewardedCoordinator(applicationContext) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+        )
+        adCoordinator.initializeAndGatherConsent(this)
         setContent {
             BlockBlastTheme {
                 Surface(
@@ -50,7 +59,8 @@ class MainActivity : ComponentActivity() {
                     AppContent(
                         soundManager = soundManager,
                         preferences = preferences,
-                        localSessionStorage = localSessionStorage
+                        localSessionStorage = localSessionStorage,
+                        adCoordinator = adCoordinator
                     )
                 }
             }
@@ -67,7 +77,8 @@ class MainActivity : ComponentActivity() {
 private fun AppContent(
     soundManager: SoundManager,
     preferences: GamePreferences,
-    localSessionStorage: LocalSessionStorage
+    localSessionStorage: LocalSessionStorage,
+    adCoordinator: RewardedAdController
 ) {
     var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
     var isGuestMode by remember {
@@ -138,6 +149,7 @@ private fun AppContent(
             )
             GameScreen(
                 viewModel = gameViewModel,
+                adCoordinator = adCoordinator,
                 onSignOut = {
                     gameViewModel.flushSession(syncToCloud = !isGuestSession)
                     if (isGuestSession) {

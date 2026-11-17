@@ -62,6 +62,18 @@ data class ShapeSpec(
         return weightsByTier.getOrElse(tier.level - 1) { 0 }.coerceAtLeast(0)
     }
 
+    fun weightForScore(score: Int): Int {
+        val tier = DifficultyTier.fromScore(score)
+        val baseWeight = weightForTier(tier)
+        if (baseWeight <= 0) return 0
+        val nextLevel = tier.level + 1
+        if (nextLevel > DifficultyTier.GRANDMASTER.level) return baseWeight
+        val nextWeight = weightsByTier.getOrElse(nextLevel - 1) { baseWeight }.coerceAtLeast(0)
+        val progress = DifficultyTier.progressToNextTier(score)
+        val interpolated = baseWeight + ((nextWeight - baseWeight) * progress * 0.5f)
+        return interpolated.toInt().coerceAtLeast(1)
+    }
+
     fun toBlockShape(): BlockShape {
         return BlockShape(
             id = id,
@@ -216,6 +228,16 @@ object ShapeDefinitions {
         listOf(false, true, false),
         listOf(true, true, true)
     )
+    private val BIG_T_LEFT = listOf(
+        listOf(true, false, false),
+        listOf(true, true, true),
+        listOf(true, false, false)
+    )
+    private val BIG_T_RIGHT = listOf(
+        listOf(false, false, true),
+        listOf(true, true, true),
+        listOf(false, false, true)
+    )
 
     // Z and S shapes
     private val Z_SHAPE = listOf(
@@ -244,7 +266,7 @@ object ShapeDefinitions {
         listOf(false, true, false)
     )
 
-    // U-Shapes (3x2 hollow cup, 5 blocks, Master+)
+    // U-Shapes (hollow cups, 5 blocks, Master+)
     private val U_UP = listOf(
         listOf(true, false, true),
         listOf(true, true, true)
@@ -252,6 +274,50 @@ object ShapeDefinitions {
     private val U_DOWN = listOf(
         listOf(true, true, true),
         listOf(true, false, true)
+    )
+    private val U_LEFT = listOf(
+        listOf(true, true),
+        listOf(true, false),
+        listOf(true, true)
+    )
+    private val U_RIGHT = listOf(
+        listOf(true, true),
+        listOf(false, true),
+        listOf(true, true)
+    )
+
+    // Irregular 3x3 Stepped Hooks (5 blocks, Master+)
+    private val J_BIG_1 = listOf(
+        listOf(true, true, false),
+        listOf(false, true, false),
+        listOf(false, true, true)
+    )
+    private val J_BIG_2 = listOf(
+        listOf(false, true, true),
+        listOf(false, true, false),
+        listOf(true, true, false)
+    )
+
+    // 3x3 H-Bridges & C-Frames (6-7 blocks, Grandmaster)
+    private val H_BRIDGE_V = listOf(
+        listOf(true, false, true),
+        listOf(true, true, true),
+        listOf(true, false, true)
+    )
+    private val H_BRIDGE_H = listOf(
+        listOf(true, true, true),
+        listOf(false, true, false),
+        listOf(true, true, true)
+    )
+    private val C_FRAME_1 = listOf(
+        listOf(true, true, true),
+        listOf(true, false, false),
+        listOf(true, true, false)
+    )
+    private val C_FRAME_2 = listOf(
+        listOf(true, true, true),
+        listOf(false, false, true),
+        listOf(false, true, true)
     )
 
     // 3x3 Staircase / W-Pentominoes (5 blocks, Master+)
@@ -332,10 +398,14 @@ object ShapeDefinitions {
         ShapeSpec("diag_2", DIAG_2, 8, DifficultyTier.TACTICIAN, 4, listOf(0, 0, 8, 10, 10)),
         ShapeSpec("plus", PLUS, 7, DifficultyTier.TACTICIAN, 4, listOf(0, 0, 8, 12, 13)),
 
-        // Complexity 5: Expert large bricks, hollow cups, staircases, 3-diagonals, big Ts
+        // Complexity 5: Expert large bricks, hollow cups, staircases, 3-diagonals, big Ts, H-bridges & C-frames
         ShapeSpec("square_3x3", SQUARE_3X3, 3, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 12, 16)),
         ShapeSpec("u_up", U_UP, 7, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 10, 13)),
         ShapeSpec("u_down", U_DOWN, 7, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 10, 13)),
+        ShapeSpec("u_left", U_LEFT, 7, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 9, 12)),
+        ShapeSpec("u_right", U_RIGHT, 7, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 9, 12)),
+        ShapeSpec("j_big_1", J_BIG_1, 5, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 9, 13)),
+        ShapeSpec("j_big_2", J_BIG_2, 5, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 9, 13)),
         ShapeSpec("stair_3_a", STAIR_3_A, 6, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 10, 14)),
         ShapeSpec("stair_3_b", STAIR_3_B, 6, DifficultyTier.MASTER, 5, listOf(0, 0, 0, 10, 14)),
         ShapeSpec("diag_3_a", DIAG_3_A, 1, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 12)),
@@ -343,8 +413,17 @@ object ShapeDefinitions {
         ShapeSpec("rect_2x3", RECT_2X3, 4, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 15)),
         ShapeSpec("rect_3x2", RECT_3X2, 4, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 15)),
         ShapeSpec("big_t_down", BIG_T_DOWN, 3, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 13)),
-        ShapeSpec("big_t_up", BIG_T_UP, 3, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 13))
+        ShapeSpec("big_t_up", BIG_T_UP, 3, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 13)),
+        ShapeSpec("big_t_left", BIG_T_LEFT, 3, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 12)),
+        ShapeSpec("big_t_right", BIG_T_RIGHT, 3, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 12)),
+        ShapeSpec("h_bridge_v", H_BRIDGE_V, 2, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 10)),
+        ShapeSpec("h_bridge_h", H_BRIDGE_H, 2, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 10)),
+        ShapeSpec("c_frame_1", C_FRAME_1, 8, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 11)),
+        ShapeSpec("c_frame_2", C_FRAME_2, 8, DifficultyTier.GRANDMASTER, 5, listOf(0, 0, 0, 0, 11))
     )
+
+    val totalShapeVarietyCount: Int
+        get() = ALL_SHAPE_SPECS.size
 
     fun getTierForScore(score: Int): DifficultyTier = DifficultyTier.fromScore(score)
 
@@ -353,17 +432,25 @@ object ShapeDefinitions {
         return ALL_SHAPE_SPECS.filter { it.weightForTier(tier) > 0 }
     }
 
+    fun getUnlockedVarietyCount(score: Int): Int {
+        return getAvailableSpecsForScore(score).size
+    }
+
+    fun getNewShapesUnlockedCount(previousScore: Int, newScore: Int): Int {
+        return (getUnlockedVarietyCount(newScore) - getUnlockedVarietyCount(previousScore)).coerceAtLeast(0)
+    }
+
     private fun pickWeightedSpec(
         candidates: List<ShapeSpec>,
-        tier: DifficultyTier,
+        score: Int,
         random: Random
     ): ShapeSpec {
-        val totalWeight = candidates.sumOf { it.weightForTier(tier) }
+        val totalWeight = candidates.sumOf { it.weightForScore(score) }
         if (totalWeight <= 0) return candidates[random.nextInt(candidates.size)]
 
         var roll = random.nextInt(totalWeight)
         for (spec in candidates) {
-            roll -= spec.weightForTier(tier)
+            roll -= spec.weightForScore(score)
             if (roll < 0) return spec
         }
         return candidates.last()
@@ -375,23 +462,27 @@ object ShapeDefinitions {
         val reliefMaxCells = if (tier.level >= DifficultyTier.MASTER.level) 4 else 3
 
         val result = mutableListOf<BlockShape>()
+        val usedIds = mutableSetOf<String>()
         var hasReliefPiece = false
 
         for (i in 0 until 3) {
+            val distinctPool = tierPool.filter { it.id !in usedIds }.ifEmpty { tierPool }
             val candidate = if (i == 2 && !hasReliefPiece) {
-                val reliefPool = tierPool.filter { it.cellCount <= reliefMaxCells }
+                val reliefPool = distinctPool.filter { it.cellCount <= reliefMaxCells }
+                    .ifEmpty { tierPool.filter { it.cellCount <= reliefMaxCells } }
                 if (reliefPool.isNotEmpty()) {
-                    pickWeightedSpec(reliefPool, tier, random)
+                    pickWeightedSpec(reliefPool, currentScore, random)
                 } else {
-                    pickWeightedSpec(tierPool, tier, random)
+                    pickWeightedSpec(distinctPool, currentScore, random)
                 }
             } else {
-                pickWeightedSpec(tierPool, tier, random)
+                pickWeightedSpec(distinctPool, currentScore, random)
             }
 
             if (candidate.cellCount <= reliefMaxCells) {
                 hasReliefPiece = true
             }
+            usedIds.add(candidate.id)
             result.add(candidate.toBlockShape())
         }
         return result

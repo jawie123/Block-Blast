@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -14,12 +15,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Bolt
@@ -27,6 +33,7 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import com.example.model.GameMode
 import com.example.model.GameOverReason
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ViewWeek
 import androidx.compose.material3.Button
@@ -38,19 +45,25 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import com.example.ui.theme.BoardBackground
 import com.example.ui.theme.BoardBorder
 import com.example.ui.theme.GoldAccent
@@ -69,9 +82,13 @@ fun GameOverDialog(
     dailyTargetScore: Int = 5000,
     dailyGlobalRecord: Int = 8540,
     hammerCount: Int = 0,
+    isRewardedAdReady: Boolean = false,
+    isRewardedAdLoading: Boolean = false,
+    isAdShowing: Boolean = false,
     onUndo: () -> Unit = {},
     onSecondChance: () -> Unit,
     onUseHammer: () -> Unit = {},
+    onWatchAdForHammer: () -> Unit = {},
     onShowLeaderboard: () -> Unit = {},
     onShowGlobalLeaderboard: () -> Unit = onShowLeaderboard,
     onRestart: () -> Unit
@@ -88,22 +105,58 @@ fun GameOverDialog(
         label = "pulseButton"
     )
 
+    val entranceProgress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        entranceProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing)
+        )
+    }
+
     Dialog(
         onDismissRequest = { /* Modal: require explicit action */ },
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
     ) {
-        Card(
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect {
+            // Let Compose animate the scrim smoothly instead of an abrupt platform dim flash
+            dialogWindow?.setDimAmount(0f)
+        }
+
+        val progress = entranceProgress.value
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
-                .testTag("game_over_dialog"),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = BoardBackground),
-            border = androidx.compose.foundation.BorderStroke(2.dp, BoardBorder)
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.72f * progress))
+                .systemBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .testTag("game_over_backdrop"),
+            contentAlignment = Alignment.Center
         ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 420.dp)
+                    .graphicsLayer {
+                        alpha = progress
+                        val scale = 0.92f + (0.08f * progress)
+                        scaleX = scale
+                        scaleY = scale
+                        translationY = (1f - progress) * 24.dp.toPx()
+                    }
+                    .testTag("game_over_dialog"),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = BoardBackground),
+                border = androidx.compose.foundation.BorderStroke(2.dp, BoardBorder)
+            ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -267,10 +320,11 @@ fun GameOverDialog(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Second Chance Button (Clear 3x3 blast)
+                // Second Chance Button (Watch Rewarded Ad for Clear 3x3 blast / +15s Time)
                 if (secondChanceAvailable) {
                     Button(
                         onClick = onSecondChance,
+                        enabled = !isAdShowing,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
@@ -296,14 +350,15 @@ fun GameOverDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Row(
+                                modifier = Modifier.padding(horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Bolt,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                                 Text(
                                     text = when {
@@ -313,8 +368,30 @@ fun GameOverDialog(
                                     },
                                     color = Color.White,
                                     fontWeight = FontWeight.Black,
-                                    fontSize = 13.sp
+                                    fontSize = 12.sp
                                 )
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0x66000000))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                        .testTag("second_chance_ad_badge"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFFD600),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = if (!isRewardedAdReady && isRewardedAdLoading) "LOADING" else "AD",
+                                        color = Color(0xFFFFD600),
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 9.sp
+                                    )
+                                }
                             }
                         }
                     }
@@ -322,7 +399,7 @@ fun GameOverDialog(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // Hammer Rescue Button (Smash single blocking block)
+                // Hammer Rescue Button (Smash single blocking block) or Watch Ad for Free Hammer
                 if (hammerCount > 0 && !isTimeUp) {
                     Button(
                         onClick = onUseHammer,
@@ -363,6 +440,57 @@ fun GameOverDialog(
                                     fontWeight = FontWeight.Black,
                                     fontSize = 13.sp,
                                     letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                } else if (!isTimeUp) {
+                    OutlinedButton(
+                        onClick = onWatchAdForHammer,
+                        enabled = !isAdShowing,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("dialog_watch_ad_hammer_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFFFB300)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color(0x1AFFB300),
+                            contentColor = Color(0xFFFFB300)
+                        )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(text = "🔨", fontSize = 15.sp)
+                            Text(
+                                text = "GET +1 FREE HAMMER",
+                                color = Color(0xFFFFD54F),
+                                fontWeight = FontWeight.Black,
+                                fontSize = 12.sp
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFFFB300).copy(alpha = 0.22f))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFB300),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = if (!isRewardedAdReady && isRewardedAdLoading) "LOADING" else "WATCH AD",
+                                    color = Color(0xFFFFB300),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 9.sp
                                 )
                             }
                         }
@@ -510,6 +638,7 @@ fun GameOverDialog(
                     }
                 }
             }
+        }
         }
     }
 }

@@ -142,6 +142,29 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testShapeVarietyPoolExpandsAndProducesDistinctBatchShapes() {
+        val scores = listOf(0, 500, 1500, 3000, 6000)
+        val unlockedCounts = scores.map { ShapeDefinitions.getUnlockedVarietyCount(it) }
+
+        for (i in 0 until unlockedCounts.size - 1) {
+            assertTrue(
+                "Expected unlocked shape variety at score ${scores[i + 1]} (${unlockedCounts[i + 1]}) > at ${scores[i]} (${unlockedCounts[i]})",
+                unlockedCounts[i + 1] > unlockedCounts[i]
+            )
+        }
+        assertEquals(ShapeDefinitions.totalShapeVarietyCount, unlockedCounts.last())
+
+        // Every 3-piece batch across all tiers should contain 3 distinct shape definitions
+        scores.forEach { score ->
+            repeat(50) { trial ->
+                val batch = ShapeDefinitions.getShapeBatch(kotlin.random.Random(9000L + score + trial), score)
+                assertEquals(3, batch.size)
+                assertEquals(3, batch.map { it.id }.toSet().size)
+            }
+        }
+    }
+
+    @Test
     fun testDailyLoginRewardScheduleProgressionAndCalendar() {
         val schedule = com.example.model.DailyLoginRewardSchedule
 

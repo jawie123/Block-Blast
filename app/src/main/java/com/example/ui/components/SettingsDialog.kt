@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
+import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Button
@@ -68,10 +69,12 @@ fun SettingsDialog(
     isMusicEnabled: Boolean,
     isSoundEnabled: Boolean,
     isHapticsEnabled: Boolean,
+    isPrivacyOptionsRequired: Boolean = false,
     achievements: List<Achievement> = AchievementCatalog.evaluateAll(0, 0, 0, 0, 0),
     onToggleMusic: () -> Unit,
     onToggleSound: () -> Unit,
     onToggleHaptics: () -> Unit,
+    onShowPrivacyOptions: () -> Unit = {},
     onOpenTutorial: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
@@ -213,6 +216,72 @@ fun SettingsDialog(
                         switchTag = "settings_haptics_switch",
                         onToggle = onToggleHaptics
                     )
+
+                    if (isPrivacyOptionsRequired) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = stringResource(R.string.settings_privacy_section_title),
+                            fontSize = 10.sp,
+                            color = Color(0xFF8E9BB0),
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 54.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFF0F111E))
+                                .border(1.dp, BoardBorder, RoundedCornerShape(16.dp))
+                                .clickable(role = Role.Button, onClick = onShowPrivacyOptions)
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag("settings_privacy_options_button"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF00E5FF).copy(alpha = 0.16f))
+                                        .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.6f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PrivacyTip,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00E5FF),
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.settings_privacy_options_label),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_privacy_options_desc),
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF8E9BB0)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "MANAGE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF00E5FF)
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(14.dp))
 

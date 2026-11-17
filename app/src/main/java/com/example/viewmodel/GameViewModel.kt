@@ -336,6 +336,8 @@ class GameViewModel(
             difficultyTitle = resumedTier.title,
             difficultyProgress = resumedProgress,
             nextDifficultyScore = resumedTier.maxScoreExclusive,
+            unlockedShapeVariety = ShapeDefinitions.getUnlockedVarietyCount(session.score),
+            totalShapeVariety = ShapeDefinitions.totalShapeVarietyCount,
             timeRemainingMs = resumedTimeMs,
             timeMaxMs = TIME_ATTACK_MAX_MS,
             lastTimeBonusSeconds = 0,
@@ -733,6 +735,8 @@ class GameViewModel(
             difficultyTitle = DifficultyTier.STARTER.title,
             difficultyProgress = 0f,
             nextDifficultyScore = DifficultyTier.STARTER.maxScoreExclusive,
+            unlockedShapeVariety = ShapeDefinitions.getUnlockedVarietyCount(0),
+            totalShapeVariety = ShapeDefinitions.totalShapeVarietyCount,
             timeRemainingMs = TIME_ATTACK_INITIAL_MS,
             timeMaxMs = TIME_ATTACK_MAX_MS,
             lastTimeBonusSeconds = 0,
@@ -869,6 +873,7 @@ class GameViewModel(
                 difficultyTitle = revertedTier.title,
                 difficultyProgress = revertedProgress,
                 nextDifficultyScore = revertedTier.maxScoreExclusive,
+                unlockedShapeVariety = ShapeDefinitions.getUnlockedVarietyCount(snapshot.score),
                 canUndo = false
             )
         }
@@ -1280,9 +1285,15 @@ class GameViewModel(
         } else {
             baseBannerText
         }
+        val newlyUnlockedShapes = if (leveledUp) {
+            ShapeDefinitions.getNewShapesUnlockedCount(currentState.score, newScore)
+        } else {
+            0
+        }
+        val unlockSuffix = if (newlyUnlockedShapes > 0) " (+$newlyUnlockedShapes SHAPES)" else ""
         val bannerText = when {
-            leveledUp && withTimeBonusBanner != null -> "LV ${newTier.level} ${newTier.title}! $withTimeBonusBanner"
-            leveledUp -> "DIFFICULTY UP! LV ${newTier.level} ${newTier.title}"
+            leveledUp && withTimeBonusBanner != null -> "LV ${newTier.level} ${newTier.title}!$unlockSuffix $withTimeBonusBanner"
+            leveledUp -> "DIFFICULTY UP! LV ${newTier.level} ${newTier.title}$unlockSuffix"
             else -> withTimeBonusBanner
         }
 
@@ -1388,6 +1399,8 @@ class GameViewModel(
                 difficultyTitle = newTier.title,
                 difficultyProgress = tierProgress,
                 nextDifficultyScore = newTier.maxScoreExclusive,
+                unlockedShapeVariety = ShapeDefinitions.getUnlockedVarietyCount(newScore),
+                totalShapeVariety = ShapeDefinitions.totalShapeVarietyCount,
                 timeRemainingMs = updatedTimeMs,
                 lastTimeBonusSeconds = bonusSeconds
             )
@@ -1453,9 +1466,10 @@ class GameViewModel(
         recordMissionEvent(MissionType.PLACE_BLOCKS, 1)
         if (totalLines > 0) {
             recordMissionEvent(MissionType.CLEAR_LINES, totalLines)
+            recordMissionEvent(MissionType.CLEAR_LINES_SINGLE_MOVE, totalLines)
             recordMissionEvent(MissionType.REACH_COMBO, newCombo)
         }
-        recordMissionEvent(MissionType.SCORE_POINTS, totalMovePoints)
+        recordMissionEvent(MissionType.SCORE_POINTS, newScore)
 
         // Evaluate & persist Achievements (10-Line Combo, High Scorer, Daily Streak, etc.)
         evaluateAndSyncAchievements(
@@ -1702,7 +1716,9 @@ class GameViewModel(
         val updated = currentMissions.map { mission ->
             if (mission.type == type && !mission.isClaimed) {
                 val newProgress = when (type) {
-                    MissionType.REACH_COMBO -> maxOf(mission.current, amount)
+                    MissionType.REACH_COMBO,
+                    MissionType.CLEAR_LINES_SINGLE_MOVE,
+                    MissionType.SCORE_POINTS -> maxOf(mission.current, amount)
                     else -> mission.current + amount
                 }.coerceAtMost(mission.target)
 
@@ -1738,6 +1754,11 @@ class GameViewModel(
         if (!mission.isCompleted || mission.isClaimed) return false
 
         preferences.setMissionClaimed(missionId, true)
+        val newCoinsBalance = preferences.coinsBalance + mission.coinReward
+        val newTotalCoinsEarned = preferences.totalCoinsEarned + mission.coinReward
+        preferences.coinsBalance = newCoinsBalance
+        preferences.totalCoinsEarned = newTotalCoinsEarned
+
         val newHammerCount = currentState.hammerCount + mission.hammerReward
         preferences.hammerCount = newHammerCount
 
@@ -1749,20 +1770,38 @@ class GameViewModel(
         soundManager.playPowerup()
         triggerHaptic(HapticEffect.PowerUp)
 
+        val rewardSummary = buildString {
+            if (mission.coinReward > 0) append("+${mission.coinReward} 🪙")
+            if (mission.coinReward > 0 && mission.hammerReward > 0) append(" & ")
+            if (mission.hammerReward > 0) append("+${mission.hammerReward} 🔨")
+        }
+        val claimedBanner = "MISSION CLAIMED: $rewardSummary!"
+
         _gameState.update {
             it.copy(
+                coinsBalance = newCoinsBalance,
                 hammerCount = newHammerCount,
                 dailyMissions = updatedMissions,
                 unclaimedMissionsCount = unclaimed,
-                comboBannerText = "+${mission.hammerReward} 🔨 REWARD CLAIMED!"
+                comboBannerText = claimedBanner
             )
         }
 
         flushSession(syncToCloud = true)
 
+        val repo = firestoreRepository
+        if (repo != null && currentUserId.isNotBlank() && mission.coinReward > 0) {
+            val localSeed = buildLocalLoginProfile()
+            viewModelScope.launch {
+                repo.creditBonusCoins(coins = mission.coinReward, localSeed = localSeed)
+            }
+        }
+
         viewModelScope.launch {
-            delay(1500)
-            _gameState.update { it.copy(comboBannerText = null) }
+            delay(1600)
+            _gameState.update {
+                if (it.comboBannerText == claimedBanner) it.copy(comboBannerText = null) else it
+            }
         }
 
         return true
@@ -2110,6 +2149,54 @@ class GameViewModel(
             }
         }
         return true
+    }
+
+    fun onRewardedAdStarted() {
+        soundManager.setMusicForegrounded(false)
+        setTimeAttackPaused(true)
+    }
+
+    fun onRewardedAdEnded(restoreMusicForeground: Boolean = true) {
+        soundManager.setMusicForegrounded(restoreMusicForeground)
+    }
+
+    fun grantSecondChanceAfterAd() {
+        useSecondChance()
+    }
+
+    fun grantFreeHammerAfterAd() {
+        val nextHammers = preferences.hammerCount + 1
+        preferences.hammerCount = nextHammers
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val earnedBanner = "+1 🔨 FREE HAMMER EARNED!"
+        _gameState.update {
+            it.copy(
+                hammerCount = nextHammers,
+                comboBannerText = earnedBanner
+            )
+        }
+        flushSession(syncToCloud = true)
+
+        viewModelScope.launch {
+            delay(1600)
+            _gameState.update {
+                if (it.comboBannerText == earnedBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+    }
+
+    fun showTemporaryBanner(message: String) {
+        if (message.isBlank()) return
+        _gameState.update { it.copy(comboBannerText = message) }
+        viewModelScope.launch {
+            delay(1800)
+            _gameState.update {
+                if (it.comboBannerText == message) it.copy(comboBannerText = null) else it
+            }
+        }
     }
 
     override fun onCleared() {

@@ -14,4 +14,10 @@
     <string name="auth_guest_hint">Play offline with local saves • Sign in anytime for cloud sync</string>
     <string name="guest_badge">GUEST</string>
     <string name="guest_leaderboard_prompt">Sign in with Google to save scores to the cloud and compete on the live rankings!</string>
+    <string name="ad_watch_badge">WATCH AD</string>
+    <string name="ad_loading_badge">LOADING AD</string>
+    <string name="free_hammer_watch_ad_label">GET +1 FREE HAMMER</string>
+    <string name="settings_privacy_section_title">PRIVACY &amp; CONSENT</string>
+    <string name="settings_privacy_options_label">Privacy &amp; Ad Consent</string>
+    <string name="settings_privacy_options_desc">Manage personalized ad preferences</string>
 </resources>

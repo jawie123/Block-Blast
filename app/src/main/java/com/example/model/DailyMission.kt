@@ -1,11 +1,12 @@
 package com.example.model
 
 enum class MissionType {
-    CLEAR_LINES,     // Clear X lines
-    REACH_COMBO,     // Reach an X combo streak
-    SCORE_POINTS,    // Score X points in a game
-    PLACE_BLOCKS,    // Place X blocks on the board
-    USE_HAMMER       // Use the Hammer power-up
+    CLEAR_LINES,             // Clear X lines total
+    CLEAR_LINES_SINGLE_MOVE, // Clear X lines in a single move
+    REACH_COMBO,             // Reach an X combo streak
+    SCORE_POINTS,            // Reach X points in a game
+    PLACE_BLOCKS,            // Place X blocks on the board
+    USE_HAMMER               // Use the Hammer power-up
 }
 
 data class DailyMission(
@@ -17,6 +18,7 @@ data class DailyMission(
     val current: Int = 0,
     val isCompleted: Boolean = false,
     val isClaimed: Boolean = false,
+    val coinReward: Int = 50,
     val hammerReward: Int = 1
 ) {
     val progressFraction: Float
@@ -28,21 +30,43 @@ object DailyMissionGenerator {
         val seed = dateStr.filter { it.isDigit() }.toLongOrNull() ?: 20261112L
         val random = java.util.Random(seed)
 
-        // 1. Line Clear mission
-        val lineTargets = listOf(4, 6, 8)
-        val lineTarget = lineTargets[random.nextInt(lineTargets.size)]
+        // 1. Signature Single-Move Multi-Line Blast mission
         val m1 = DailyMission(
-            id = "mission_lines_$dateStr",
-            title = "Line Sweeper",
-            description = "Clear $lineTarget rows or columns",
-            type = MissionType.CLEAR_LINES,
-            target = lineTarget,
+            id = "mission_single_move_lines_$dateStr",
+            title = "Triple Line Blast",
+            description = "Clear 3 lines in one move",
+            type = MissionType.CLEAR_LINES_SINGLE_MOVE,
+            target = 3,
+            coinReward = 100,
             hammerReward = 1
         )
 
-        // 2. Combo or Score mission
-        val isCombo = random.nextBoolean()
-        val m2 = if (isCombo) {
+        // 2. Signature Score Milestone mission
+        val m2 = DailyMission(
+            id = "mission_score_1000_$dateStr",
+            title = "Point Milestone",
+            description = "Reach 1,000 points in a game",
+            type = MissionType.SCORE_POINTS,
+            target = 1000,
+            coinReward = 75,
+            hammerReward = 1
+        )
+
+        // 3. Rotating Line Sweeper or Combo Master mission
+        val isLineSweep = random.nextBoolean()
+        val m3 = if (isLineSweep) {
+            val lineTargets = listOf(5, 7, 10)
+            val lineTarget = lineTargets[random.nextInt(lineTargets.size)]
+            DailyMission(
+                id = "mission_lines_$dateStr",
+                title = "Line Sweeper",
+                description = "Clear $lineTarget rows or columns today",
+                type = MissionType.CLEAR_LINES,
+                target = lineTarget,
+                coinReward = 50 + (lineTarget * 5),
+                hammerReward = 1
+            )
+        } else {
             val comboTarget = if (random.nextBoolean()) 3 else 4
             DailyMission(
                 id = "mission_combo_$dateStr",
@@ -50,24 +74,14 @@ object DailyMissionGenerator {
                 description = "Achieve a ${comboTarget}x combo streak",
                 type = MissionType.REACH_COMBO,
                 target = comboTarget,
-                hammerReward = 2
-            )
-        } else {
-            val scoreTargets = listOf(1500, 2500, 3500)
-            val scoreTarget = scoreTargets[random.nextInt(scoreTargets.size)]
-            DailyMission(
-                id = "mission_score_$dateStr",
-                title = "High Scorer",
-                description = "Score $scoreTarget points in a game",
-                type = MissionType.SCORE_POINTS,
-                target = scoreTarget,
-                hammerReward = 2
+                coinReward = comboTarget * 25,
+                hammerReward = 1
             )
         }
 
-        // 3. Placement or Hammer mission
+        // 4. Rotating Block Builder or Hammer Smash mission
         val isPlacement = random.nextBoolean()
-        val m3 = if (isPlacement) {
+        val m4 = if (isPlacement) {
             val blockTargets = listOf(15, 20, 25)
             val blockTarget = blockTargets[random.nextInt(blockTargets.size)]
             DailyMission(
@@ -76,6 +90,7 @@ object DailyMissionGenerator {
                 description = "Place $blockTarget blocks on the board",
                 type = MissionType.PLACE_BLOCKS,
                 target = blockTarget,
+                coinReward = 50,
                 hammerReward = 1
             )
         } else {
@@ -85,10 +100,11 @@ object DailyMissionGenerator {
                 description = "Use the Hammer power-up once",
                 type = MissionType.USE_HAMMER,
                 target = 1,
+                coinReward = 60,
                 hammerReward = 1
             )
         }
 
-        return listOf(m1, m2, m3)
+        return listOf(m1, m2, m3, m4)
     }
 }

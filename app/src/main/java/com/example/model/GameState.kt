@@ -69,6 +69,8 @@ data class GameState(
     val difficultyTitle: String = DifficultyTier.STARTER.title,
     val difficultyProgress: Float = 0f,
     val nextDifficultyScore: Int? = DifficultyTier.STARTER.maxScoreExclusive,
+    val unlockedShapeVariety: Int = ShapeDefinitions.getUnlockedVarietyCount(0),
+    val totalShapeVariety: Int = ShapeDefinitions.totalShapeVarietyCount,
     val timeRemainingMs: Long = 60_000L,
     val timeMaxMs: Long = 99_000L,
     val lastTimeBonusSeconds: Int = 0,

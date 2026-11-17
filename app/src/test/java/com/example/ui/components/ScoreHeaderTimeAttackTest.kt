@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.example.model.GameMode
 import com.example.model.GameOverReason
 import org.junit.Assert.assertEquals
@@ -103,5 +104,45 @@ class ScoreHeaderTimeAttackTest {
         composeTestRule.onNodeWithText("SECOND CHANCE (+15s TIME)").assertIsDisplayed()
         composeTestRule.onNodeWithTag("dialog_undo_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("dialog_use_hammer_button").assertDoesNotExist()
+    }
+
+    @Test
+    fun `game over overlay fades in smoothly and remains interactive after entrance animation`() {
+        var restarted = false
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.setContent {
+                GameOverDialog(
+                    score = 920,
+                    highScore = 1500,
+                    isNewHighScore = false,
+                    linesCleared = 8,
+                    maxCombo = 2,
+                    secondChanceAvailable = true,
+                    onSecondChance = {},
+                    onRestart = { restarted = true }
+                )
+            }
+
+            // Advance partway through the 320ms entrance fade-in
+            composeTestRule.mainClock.advanceTimeBy(160L)
+            composeTestRule.onNodeWithTag("game_over_backdrop").assertExists()
+            composeTestRule.onNodeWithTag("game_over_dialog").assertExists()
+
+            // Finish the fade-in transition
+            composeTestRule.mainClock.advanceTimeBy(240L)
+            composeTestRule.mainClock.autoAdvance = true
+            composeTestRule.waitForIdle()
+
+            composeTestRule.onNodeWithTag("game_over_backdrop").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("game_over_dialog").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("dialog_play_again_button")
+                .performScrollTo()
+                .performClick()
+
+            assertEquals(true, restarted)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
     }
 }

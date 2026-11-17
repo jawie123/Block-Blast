@@ -3,6 +3,7 @@ package com.example.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,9 +24,15 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -56,9 +63,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.ads.AdUiState
+import com.example.ads.RewardedAdController
+import com.example.ads.RewardedAdRewardType
+import com.example.ads.findActivity
 import com.example.audio.AppHaptics
 import com.example.audio.HapticEffect
 import com.example.model.BlockShape
@@ -67,7 +79,7 @@ import com.example.model.GameMode
 import com.example.ui.components.ComboMultiplierHud
 import com.example.ui.components.DailyLeaderboardDialog
 import com.example.ui.components.DailyLoginRewardDialog
-import com.example.ui.components.DailyMissionsDialog
+import com.example.ui.components.DailyMissionsDrawer
 import com.example.ui.components.GridBoard
 import com.example.ui.components.GameOverDialog
 import com.example.ui.components.LeaderboardTab
@@ -78,17 +90,21 @@ import com.example.ui.components.SettingsDialog
 import com.example.ui.components.ShapeRenderer
 import com.example.ui.components.StatsDialog
 import com.example.ui.components.TutorialOverlay
+import com.example.ui.theme.BoardBackground
+import com.example.ui.theme.BoardBorder
 import com.example.ui.theme.DarkBackground
 import com.example.viewmodel.GameViewModel
 
 @Composable
 fun GameScreen(
     viewModel: GameViewModel,
+    adCoordinator: RewardedAdController? = null,
     onSignOut: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val gameState by viewModel.gameState.collectAsState()
     val showTutorial by viewModel.showTutorial.collectAsState()
+    val adState = adCoordinator?.adState?.collectAsState()?.value ?: AdUiState()
     val density = LocalDensity.current
 
     // Haptic feedback & context
@@ -96,12 +112,13 @@ fun GameScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Dialog state
+    // Dialog & drawer state
     var showStatsDialog by remember { mutableStateOf(false) }
-    var showMissionsDialog by remember { mutableStateOf(false) }
+    var showMissionsDrawer by remember { mutableStateOf(false) }
     var showLoginRewardDialog by remember { mutableStateOf(false) }
     var showLeaderboardDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showFreeHammerAdDialog by remember { mutableStateOf(false) }
     var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.HIGH_SCORES) }
     var isLifecyclePaused by remember { mutableStateOf(false) }
 
@@ -129,27 +146,60 @@ fun GameScreen(
         }
     }
 
-    // Pause Time Attack clock while tutorial, dialogs, game over, or lifecycle pause are active
+    // Pause Time Attack clock while tutorial, dialogs, game over, ad playback, or lifecycle pause are active
     LaunchedEffect(
         isLifecyclePaused,
+        adState.isAdShowing,
         showTutorial,
         showStatsDialog,
-        showMissionsDialog,
+        showMissionsDrawer,
         showLoginRewardDialog,
         showLeaderboardDialog,
         showSettingsDialog,
+        showFreeHammerAdDialog,
         gameState.isGameOver,
         gameState.gameMode
     ) {
         val shouldPause = isLifecyclePaused ||
+            adState.isAdShowing ||
             showTutorial ||
             showStatsDialog ||
-            showMissionsDialog ||
+            showMissionsDrawer ||
             showLoginRewardDialog ||
             showLeaderboardDialog ||
             showSettingsDialog ||
+            showFreeHammerAdDialog ||
             gameState.isGameOver
         viewModel.setTimeAttackPaused(shouldPause)
+    }
+
+    val launchRewardedAd: (RewardedAdRewardType) -> Unit = { rewardType ->
+        val activity = context.findActivity()
+        if (adCoordinator != null && activity != null) {
+            adCoordinator.showRewardedAd(
+                activity = activity,
+                rewardType = rewardType,
+                onAdStarted = { viewModel.onRewardedAdStarted() },
+                onRewardEarned = { earnedType ->
+                    when (earnedType) {
+                        RewardedAdRewardType.SECOND_CHANCE -> viewModel.grantSecondChanceAfterAd()
+                        RewardedAdRewardType.FREE_HAMMER -> viewModel.grantFreeHammerAfterAd()
+                    }
+                },
+                onAdClosedOrFailed = { errorMsg ->
+                    viewModel.onRewardedAdEnded(restoreMusicForeground = !isLifecyclePaused)
+                    if (!errorMsg.isNullOrBlank()) {
+                        viewModel.showTemporaryBanner(errorMsg)
+                    }
+                }
+            )
+        } else {
+            if (rewardType == RewardedAdRewardType.SECOND_CHANCE) {
+                viewModel.useSecondChance()
+            } else {
+                viewModel.showTemporaryBanner("Ads unavailable right now.")
+            }
+        }
     }
 
     // Observe and perform tactile vibrations on placement, line clears, pickups, and game over
@@ -242,17 +292,21 @@ fun GameScreen(
     // Active dragging shape
     val draggingShape = draggingIndex?.let { gameState.activePieces.getOrNull(it) }
 
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .onGloballyPositioned { coordinates ->
-                containerRootTopLeft = coordinates.boundsInRoot().topLeft
-            }
-            .testTag("game_screen")
     ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .onGloballyPositioned { coordinates ->
+                    containerRootTopLeft = coordinates.boundsInRoot().topLeft
+                }
+                .testTag("game_screen")
+        ) {
         val isCompactHeight = maxHeight < 580.dp
 
         Column(
@@ -284,6 +338,8 @@ fun GameScreen(
                 difficultyTitle = gameState.difficultyTitle,
                 difficultyProgress = gameState.difficultyProgress,
                 nextDifficultyScore = gameState.nextDifficultyScore,
+                unlockedShapeVariety = gameState.unlockedShapeVariety,
+                totalShapeVariety = gameState.totalShapeVariety,
                 timeRemainingMs = gameState.timeRemainingMs,
                 timeMaxMs = gameState.timeMaxMs,
                 lastTimeBonusSeconds = gameState.lastTimeBonusSeconds,
@@ -302,8 +358,18 @@ fun GameScreen(
                 },
                 onSignOut = onSignOut,
                 onUndo = { viewModel.undoLastMove() },
-                onToggleHammer = { viewModel.toggleHammerMode() },
-                onShowMissions = { showMissionsDialog = true },
+                onToggleHammer = {
+                    if (gameState.hammerCount <= 0 && !gameState.isHammerActive) {
+                        if (adCoordinator != null) {
+                            showFreeHammerAdDialog = true
+                        } else {
+                            viewModel.toggleHammerMode()
+                        }
+                    } else {
+                        viewModel.toggleHammerMode()
+                    }
+                },
+                onShowMissions = { showMissionsDrawer = true },
                 onShowDailyRewards = { showLoginRewardDialog = true },
                 onSwitchMode = { mode -> viewModel.switchGameMode(mode) },
                 onRestart = { viewModel.startNewGame() },
@@ -422,6 +488,7 @@ fun GameScreen(
                     val shape = viewModel.gameState.value.activePieces.getOrNull(idx)
                     if (shape != null && viewModel.canFitAnywhere(viewModel.gameState.value.grid, shape)) {
                         viewModel.soundManager.playPickup()
+                        viewModel.triggerHaptic(HapticEffect.Pickup)
                         draggingIndex = idx
                         dragTouchPos = initialTouchPos
                         viewModel.selectPieceForTap(null)
@@ -494,9 +561,13 @@ fun GameScreen(
                 dailyTargetScore = gameState.dailyTargetScore,
                 dailyGlobalRecord = gameState.dailyGlobalRecord,
                 hammerCount = gameState.hammerCount,
+                isRewardedAdReady = adState.isRewardedAdReady,
+                isRewardedAdLoading = adState.isRewardedAdLoading,
+                isAdShowing = adState.isAdShowing,
                 onUndo = { viewModel.undoLastMove() },
-                onSecondChance = { viewModel.useSecondChance() },
+                onSecondChance = { launchRewardedAd(RewardedAdRewardType.SECOND_CHANCE) },
                 onUseHammer = { viewModel.activateHammerFromGameOver() },
+                onWatchAdForHammer = { launchRewardedAd(RewardedAdRewardType.FREE_HAMMER) },
                 onShowLeaderboard = {
                     leaderboardInitialTab = LeaderboardTab.DAILY
                     showLeaderboardDialog = true
@@ -540,15 +611,7 @@ fun GameScreen(
             )
         }
 
-        // Daily Missions Dialog
-        if (showMissionsDialog) {
-            DailyMissionsDialog(
-                missions = gameState.dailyMissions,
-                hammerCount = gameState.hammerCount,
-                onClaimReward = { missionId -> viewModel.claimMissionReward(missionId) },
-                onDismiss = { showMissionsDialog = false }
-            )
-        }
+        // Daily Missions Dialog replaced by dedicated root-level DailyMissionsDrawer below
 
         // Daily Login Rewards Dialog
         if (showLoginRewardDialog) {
@@ -578,8 +641,12 @@ fun GameScreen(
                 isLoading = gameState.isDailyLoginLoading,
                 errorMessage = gameState.dailyLoginError,
                 isGuestMode = gameState.currentUserId.isBlank(),
+                isRewardedAdReady = adState.isRewardedAdReady,
+                isRewardedAdLoading = adState.isRewardedAdLoading,
+                isAdShowing = adState.isAdShowing,
                 onClaimToday = { viewModel.claimDailyLoginReward() },
                 onExchangeCoinsForHammer = { viewModel.exchangeCoinsForHammer() },
+                onWatchAdForHammer = { launchRewardedAd(RewardedAdRewardType.FREE_HAMMER) },
                 onSignInWithGoogle = {
                     showLoginRewardDialog = false
                     onSignOut()
@@ -599,18 +666,47 @@ fun GameScreen(
             )
         }
 
-        // Settings Menu Dialog (Background Music, Sound Effects & Haptics)
+        // Settings Menu Dialog (Background Music, Sound Effects, Haptics & Privacy)
         if (showSettingsDialog) {
             SettingsDialog(
                 isMusicEnabled = gameState.isMusicEnabled,
                 isSoundEnabled = gameState.isSoundEnabled,
                 isHapticsEnabled = gameState.isHapticsEnabled,
+                isPrivacyOptionsRequired = adState.isPrivacyOptionsRequired,
                 achievements = gameState.achievements,
                 onToggleMusic = { viewModel.toggleMusic() },
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
+                onShowPrivacyOptions = {
+                    val activity = context.findActivity()
+                    if (activity != null) {
+                        adCoordinator?.showPrivacyOptionsForm(activity) { err ->
+                            if (!err.isNullOrBlank()) {
+                                viewModel.showTemporaryBanner("Privacy options unavailable right now.")
+                            }
+                        }
+                    }
+                },
                 onOpenTutorial = { viewModel.openTutorial() },
                 onDismiss = { showSettingsDialog = false }
+            )
+        }
+
+        // Out-of-Hammers Rewarded Ad Prompt
+        if (showFreeHammerAdDialog) {
+            FreeHammerAdPromptDialog(
+                isRewardedAdReady = adState.isRewardedAdReady,
+                isRewardedAdLoading = adState.isRewardedAdLoading,
+                isAdShowing = adState.isAdShowing,
+                onWatchAd = {
+                    showFreeHammerAdDialog = false
+                    launchRewardedAd(RewardedAdRewardType.FREE_HAMMER)
+                },
+                onOpenDailyRewards = {
+                    showFreeHammerAdDialog = false
+                    showLoginRewardDialog = true
+                },
+                onDismiss = { showFreeHammerAdDialog = false }
             )
         }
 
@@ -620,5 +716,130 @@ fun GameScreen(
             onDismiss = { viewModel.dismissTutorial() },
             soundManager = viewModel.soundManager
         )
+        }
+
+        // Dedicated Edge-to-Edge Slide-In Daily Missions Drawer
+        DailyMissionsDrawer(
+            visible = showMissionsDrawer,
+            missions = gameState.dailyMissions,
+            coinsBalance = gameState.coinsBalance,
+            hammerCount = gameState.hammerCount,
+            onClaimReward = { missionId -> viewModel.claimMissionReward(missionId) },
+            onDismiss = { showMissionsDrawer = false }
+        )
     }
 }
+
+@Composable
+private fun FreeHammerAdPromptDialog(
+    isRewardedAdReady: Boolean,
+    isRewardedAdLoading: Boolean,
+    isAdShowing: Boolean,
+    onWatchAd: () -> Unit,
+    onOpenDailyRewards: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+                .testTag("free_hammer_ad_dialog"),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = BoardBackground),
+            border = BorderStroke(1.5.dp, BoardBorder)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "🔨",
+                    fontSize = 36.sp
+                )
+                Text(
+                    text = "OUT OF HAMMERS!",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color(0xFFFFD54F),
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = "Watch a short video ad to earn +1 Free Hammer instantly, or craft one with Coins in Daily Rewards.",
+                    fontSize = 12.sp,
+                    color = Color(0xFFB4C0D8)
+                )
+
+                Button(
+                    onClick = onWatchAd,
+                    enabled = !isAdShowing,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("free_hammer_watch_ad_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color(0xFF0F111E),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = if (!isRewardedAdReady && isRewardedAdLoading) {
+                                "LOADING AD..."
+                            } else {
+                                "WATCH AD • +1 HAMMER"
+                            },
+                            color = Color(0xFF0F111E),
+                            fontWeight = FontWeight.Black,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onOpenDailyRewards,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("free_hammer_daily_rewards_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF00E5FF)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF))
+                ) {
+                    Text(
+                        text = "CRAFT WITH COINS",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .testTag("free_hammer_cancel_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, BoardBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E9BB0))
+                ) {
+                    Text(
+                        text = "NOT NOW",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+    }
+}
+

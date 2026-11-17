@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Vibration
 import com.example.model.GameMode
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +45,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +81,8 @@ fun ScoreHeader(
     difficultyTitle: String = "STARTER",
     difficultyProgress: Float = 0f,
     nextDifficultyScore: Int? = 500,
+    unlockedShapeVariety: Int = 18,
+    totalShapeVariety: Int = 58,
     timeRemainingMs: Long = 60_000L,
     timeMaxMs: Long = 99_000L,
     lastTimeBonusSeconds: Int = 0,
@@ -911,8 +919,119 @@ fun ScoreHeader(
                 fontSize = 8.sp,
                 color = Color(0xFF8E9BB0),
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.3.sp
+                letterSpacing = 0.3.sp,
+                maxLines = 1
             )
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(Color(0xFF1A2138))
+                    .border(0.6.dp, tierAccent.copy(alpha = 0.45f), RoundedCornerShape(5.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                    .semantics {
+                        contentDescription = "$unlockedShapeVariety of $totalShapeVariety block shapes unlocked"
+                    }
+                    .testTag("difficulty_shape_variety_badge")
+            ) {
+                Text(
+                    text = "${unlockedShapeVariety}/${totalShapeVariety}",
+                    fontSize = 8.sp,
+                    color = tierAccent,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1
+                )
+            }
+
+            // Quick Gameplay Toggles: Sound Effects & Haptic Feedback
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val sfxAccent = Color(0xFF00E5FF)
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (isSoundEnabled) sfxAccent.copy(alpha = 0.16f) else Color(0xFF1A2036)
+                        )
+                        .border(
+                            0.8.dp,
+                            if (isSoundEnabled) sfxAccent.copy(alpha = 0.65f) else BoardBorder,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .clickable(role = Role.Switch) { onToggleSound() }
+                        .semantics {
+                            contentDescription = if (isSoundEnabled) {
+                                "Sound Effects On, tap to mute"
+                            } else {
+                                "Sound Effects Off, tap to unmute"
+                            }
+                        }
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                        .testTag("quick_sfx_toggle"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSoundEnabled) {
+                            Icons.AutoMirrored.Filled.VolumeUp
+                        } else {
+                            Icons.AutoMirrored.Filled.VolumeOff
+                        },
+                        contentDescription = null,
+                        tint = if (isSoundEnabled) sfxAccent else Color(0xFF6B768C),
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Text(
+                        text = "SFX",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isSoundEnabled) sfxAccent else Color(0xFF6B768C),
+                        maxLines = 1
+                    )
+                }
+
+                val hapticsAccent = Color(0xFFFF9800)
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (isHapticsEnabled) hapticsAccent.copy(alpha = 0.16f) else Color(0xFF1A2036)
+                        )
+                        .border(
+                            0.8.dp,
+                            if (isHapticsEnabled) hapticsAccent.copy(alpha = 0.65f) else BoardBorder,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .clickable(role = Role.Switch) { onToggleHaptics() }
+                        .semantics {
+                            contentDescription = if (isHapticsEnabled) {
+                                "Haptic Feedback On, tap to disable"
+                            } else {
+                                "Haptic Feedback Off, tap to enable"
+                            }
+                        }
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                        .testTag("quick_haptics_toggle"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Vibration,
+                        contentDescription = null,
+                        tint = if (isHapticsEnabled) hapticsAccent else Color(0xFF6B768C),
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Text(
+                        text = "HAPTIC",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isHapticsEnabled) hapticsAccent else Color(0xFF6B768C),
+                        maxLines = 1
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(if (compactMode) 2.dp else 4.dp))

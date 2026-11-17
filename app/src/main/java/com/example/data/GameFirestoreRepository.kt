@@ -764,7 +764,9 @@ class GameFirestoreRepository(
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
             ) ?: return Result.success(null)
 
-            if (localProfile.totalDaysClaimed > cloud.totalDaysClaimed) {
+            if (localProfile.totalDaysClaimed > cloud.totalDaysClaimed ||
+                localProfile.totalCoinsEarned > cloud.totalCoinsEarned
+            ) {
                 val mergedLongest = maxOf(cloud.longestLoginStreak, localProfile.longestLoginStreak).coerceIn(0L, 100_000L)
                 val mergedDays = maxOf(cloud.totalDaysClaimed, localProfile.totalDaysClaimed).coerceIn(0L, 100_000L)
                 val mergedTotalCoins = maxOf(cloud.totalCoinsEarned, localProfile.totalCoinsEarned).coerceIn(0L, 100_000_000L)
@@ -842,6 +844,73 @@ class GameFirestoreRepository(
                 )
             ).await()
             Result.success(remaining)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, targetPath)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Credits bonus Blast Coins earned from Daily Missions to the signed-in user's
+     * Firestore rewards wallet (`users/{uid}/rewards/daily_login`).
+     */
+    suspend fun creditBonusCoins(
+        coins: Int,
+        localSeed: DailyLoginRewardProfile? = null
+    ): Result<Long> {
+        var targetPath = "users/unknown/rewards/$DAILY_LOGIN_DOC_ID"
+        return try {
+            val uid = requireUserId()
+            if (coins <= 0) return Result.success(localSeed?.coinsBalance ?: 0L)
+            targetPath = "users/$uid/rewards/$DAILY_LOGIN_DOC_ID"
+            val docRef = db.collection("users")
+                .document(uid)
+                .collection("rewards")
+                .document(DAILY_LOGIN_DOC_ID)
+
+            val newBalance = db.runTransaction { transaction ->
+                val snap = transaction.get(docRef)
+                if (!snap.exists()) {
+                    val initialBalance = (localSeed?.coinsBalance ?: coins.toLong())
+                        .coerceIn(coins.toLong(), 100_000_000L)
+                    val initialTotal = maxOf(
+                        localSeed?.totalCoinsEarned ?: coins.toLong(),
+                        initialBalance
+                    ).coerceIn(0L, 100_000_000L)
+                    val payload = mapOf(
+                        "userId" to uid,
+                        "loginStreak" to (localSeed?.loginStreak ?: 0L).coerceIn(0L, 100_000L),
+                        "longestLoginStreak" to (localSeed?.longestLoginStreak ?: 0L).coerceIn(0L, 100_000L),
+                        "lastClaimDate" to (localSeed?.lastClaimDate ?: ""),
+                        "totalDaysClaimed" to (localSeed?.totalDaysClaimed ?: 0L).coerceIn(0L, 100_000L),
+                        "coinsBalance" to initialBalance,
+                        "totalCoinsEarned" to initialTotal,
+                        "totalHammersEarned" to (localSeed?.totalHammersEarned ?: 0L).coerceIn(0L, 1_000_000L),
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    transaction.set(docRef, payload)
+                    initialBalance
+                } else {
+                    val currentCoins = snap.getLong("coinsBalance") ?: 0L
+                    val currentTotal = snap.getLong("totalCoinsEarned") ?: 0L
+                    val updatedCoins = (currentCoins + coins.toLong()).coerceAtMost(100_000_000L)
+                    val updatedTotal = maxOf(currentTotal + coins.toLong(), updatedCoins)
+                        .coerceAtMost(100_000_000L)
+                    transaction.update(
+                        docRef,
+                        mapOf(
+                            "coinsBalance" to updatedCoins,
+                            "totalCoinsEarned" to updatedTotal,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    updatedCoins
+                }
+            }.await()
+            Result.success(newBalance)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

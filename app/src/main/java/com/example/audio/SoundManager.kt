@@ -205,16 +205,14 @@ class SoundManager(private val context: Context) {
     }
 
     fun playPickup() {
-        if (!isSoundEnabled) return
-        if (soundPickupId != 0) {
+        if (isSoundEnabled && soundPickupId != 0) {
             soundPool.play(soundPickupId, 0.85f, 0.85f, 1, 0, 1.0f)
         }
         vibrate(15)
     }
 
     fun playPlace() {
-        if (!isSoundEnabled) return
-        if (soundPlaceId != 0) {
+        if (isSoundEnabled && soundPlaceId != 0) {
             soundPool.play(soundPlaceId, 1f, 1f, 1, 0, 1.0f)
         }
         vibrate(25)
@@ -224,44 +222,41 @@ class SoundManager(private val context: Context) {
      * Plays line clear chime with pitch scaling higher with combo streak.
      */
     fun playLineClear(comboStreak: Int) {
-        if (!isSoundEnabled) return
-        val pitchRate = (1.0f + (comboStreak.coerceIn(0, 6) * 0.12f)).coerceIn(0.8f, 2.0f)
-        if (soundLineClearId != 0) {
+        if (isSoundEnabled && soundLineClearId != 0) {
+            val pitchRate = (1.0f + (comboStreak.coerceIn(0, 6) * 0.12f)).coerceIn(0.8f, 2.0f)
             soundPool.play(soundLineClearId, 1f, 1f, 2, 0, pitchRate)
         }
         vibrateHeavy()
     }
 
     fun playComboCheer() {
-        if (!isSoundEnabled) return
-        if (soundComboId != 0) {
+        if (isSoundEnabled && soundComboId != 0) {
             soundPool.play(soundComboId, 1f, 1f, 3, 0, 1.0f)
         }
         vibrateHeavy()
     }
 
     fun playGameOver() {
-        if (!isSoundEnabled) return
-        if (soundGameOverId != 0) {
+        if (isSoundEnabled && soundGameOverId != 0) {
             soundPool.play(soundGameOverId, 1f, 1f, 4, 0, 1.0f)
         }
         vibrate(60)
     }
 
     fun playPowerup() {
-        if (!isSoundEnabled) return
-        if (soundPowerupId != 0) {
+        if (isSoundEnabled && soundPowerupId != 0) {
             soundPool.play(soundPowerupId, 1f, 1f, 3, 0, 1.0f)
         }
         vibrateHeavy()
     }
 
     fun playHammerSmash() {
-        if (!isSoundEnabled) return
-        if (soundHammerId != 0) {
-            soundPool.play(soundHammerId, 1f, 1f, 3, 0, 1.0f)
-        } else {
-            playPlace()
+        if (isSoundEnabled) {
+            if (soundHammerId != 0) {
+                soundPool.play(soundHammerId, 1f, 1f, 3, 0, 1.0f)
+            } else if (soundPlaceId != 0) {
+                soundPool.play(soundPlaceId, 1f, 1f, 1, 0, 1.0f)
+            }
         }
         vibrateHeavy()
     }
