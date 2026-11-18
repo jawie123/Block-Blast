@@ -30,6 +30,14 @@ data class LineClearBurst(
     val isColClear: Boolean = false
 )
 
+data class PlacementHint(
+    val pieceIndex: Int,
+    val row: Int,
+    val col: Int,
+    val cells: Set<Pair<Int, Int>>,
+    val clearedLines: Int = 0
+)
+
 data class GameState(
     val grid: List<List<Int>> = List(8) { List(8) { 0 } },
     val activePieces: List<BlockShape?> = emptyList(),
@@ -63,6 +71,8 @@ data class GameState(
     val canUndo: Boolean = false,
     val hammerCount: Int = 3,
     val isHammerActive: Boolean = false,
+    val hintCount: Int = 2,
+    val activeHint: PlacementHint? = null,
     val dailyMissions: List<DailyMission> = emptyList(),
     val unclaimedMissionsCount: Int = 0,
     val difficultyLevel: Int = 1,

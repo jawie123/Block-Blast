@@ -73,6 +73,8 @@ fun ScoreHeader(
     dailyPuzzleTitle: String = "",
     hammerCount: Int = 3,
     isHammerActive: Boolean = false,
+    hintCount: Int = 2,
+    isHintActive: Boolean = false,
     unclaimedMissions: Int = 0,
     coinsBalance: Int = 0,
     loginStreak: Int = 0,
@@ -96,6 +98,7 @@ fun ScoreHeader(
     onSignOut: () -> Unit = {},
     onUndo: () -> Unit = {},
     onToggleHammer: () -> Unit = {},
+    onUseHint: () -> Unit = {},
     onShowMissions: () -> Unit = {},
     onShowDailyRewards: () -> Unit = {},
     onSwitchMode: (GameMode) -> Unit = {},
@@ -634,10 +637,10 @@ fun ScoreHeader(
                 )
             }
 
-            // Power-ups, Daily Login Gift & Missions Quick Bar
+            // Power-ups, Hints, Daily Login Gift & Missions Quick Bar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 // Hammer Power-up Button
                 Box(
@@ -660,13 +663,13 @@ fun ScoreHeader(
                             shape = RoundedCornerShape(10.dp)
                         )
                         .clickable { onToggleHammer() }
-                        .padding(horizontal = 6.dp, vertical = 5.dp)
+                        .padding(horizontal = 5.dp, vertical = 5.dp)
                         .testTag("hammer_powerup_button"),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
                             text = "🔨",
@@ -677,6 +680,48 @@ fun ScoreHeader(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Black,
                             color = if (isHammerActive) Color(0xFF0F111E) else if (hammerCount > 0) Color(0xFFFFD54F) else Color.Gray
+                        )
+                    }
+                }
+
+                // Hint Power-up Button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isHintActive) {
+                                Brush.horizontalGradient(
+                                    listOf(Color(0xFF00E5FF), Color(0xFF2979FF))
+                                )
+                            } else {
+                                Brush.horizontalGradient(
+                                    listOf(Color(0xFF1E2235), Color(0xFF161928))
+                                )
+                            }
+                        )
+                        .border(
+                            width = if (isHintActive) 1.5.dp else 1.dp,
+                            color = if (isHintActive) Color(0xFF80D8FF) else if (hintCount > 0) Color(0xFF00E5FF).copy(alpha = 0.55f) else BoardBorder,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onUseHint() }
+                        .padding(horizontal = 5.dp, vertical = 5.dp)
+                        .testTag("hint_powerup_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "💡",
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = if (isHintActive) "GO" else "$hintCount",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isHintActive) Color(0xFF0F111E) else if (hintCount > 0) Color(0xFF80D8FF) else Color.Gray
                         )
                     }
                 }

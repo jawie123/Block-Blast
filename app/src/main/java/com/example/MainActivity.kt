@@ -49,7 +49,6 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
         )
-        adCoordinator.initializeAndGatherConsent(this)
         setContent {
             BlockBlastTheme {
                 Surface(
@@ -64,6 +63,9 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+        runCatching {
+            adCoordinator.initializeAndGatherConsent(this)
         }
     }
 
@@ -80,12 +82,18 @@ private fun AppContent(
     localSessionStorage: LocalSessionStorage,
     adCoordinator: RewardedAdController
 ) {
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
+    val firebaseAuth = remember { runCatching { Firebase.auth }.getOrNull() }
+    var currentUser by remember { mutableStateOf(firebaseAuth?.currentUser) }
     var isGuestMode by remember {
-        mutableStateOf(preferences.isGuestSession && Firebase.auth.currentUser == null)
+        mutableStateOf(
+            firebaseAuth == null || (preferences.isGuestSession && firebaseAuth.currentUser == null)
+        )
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(firebaseAuth) {
+        if (firebaseAuth == null) {
+            return@DisposableEffect onDispose {}
+        }
         val listener = FirebaseAuth.AuthStateListener { auth ->
             val signedInUser = auth.currentUser
             currentUser = signedInUser
@@ -94,9 +102,9 @@ private fun AppContent(
                 isGuestMode = false
             }
         }
-        Firebase.auth.addAuthStateListener(listener)
+        firebaseAuth.addAuthStateListener(listener)
         onDispose {
-            Firebase.auth.removeAuthStateListener(listener)
+            firebaseAuth.removeAuthStateListener(listener)
         }
     }
 
@@ -107,7 +115,7 @@ private fun AppContent(
             onAuthSuccess = {
                 preferences.isGuestSession = false
                 isGuestMode = false
-                currentUser = Firebase.auth.currentUser
+                currentUser = firebaseAuth?.currentUser
             },
             onContinueAsGuest = {
                 preferences.isGuestSession = true

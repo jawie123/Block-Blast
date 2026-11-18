@@ -240,9 +240,9 @@ class ExampleRobolectricTest {
 
         val missions = com.example.model.DailyMissionGenerator.generateMissionsForDate(testDate)
         assertEquals(4, missions.size)
-        assertTrue(missions.any { it.type == com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE && it.target == 3 })
+        assertTrue(missions.any { it.type == com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE && it.target == 5 })
         assertTrue(missions.any { it.type == com.example.model.MissionType.SCORE_POINTS && it.target == 1000 })
-        assertTrue(missions.all { it.coinReward > 0 })
+        assertTrue(missions.all { it.coinReward > 0 || it.hintReward > 0 })
 
         // Deterministic: generated twice for same date gives identical mission IDs, targets, and rewards
         val missionsAgain = com.example.model.DailyMissionGenerator.generateMissionsForDate(testDate)
@@ -251,11 +251,13 @@ class ExampleRobolectricTest {
             assertEquals(missions[i].type, missionsAgain[i].type)
             assertEquals(missions[i].target, missionsAgain[i].target)
             assertEquals(missions[i].coinReward, missionsAgain[i].coinReward)
+            assertEquals(missions[i].hintReward, missionsAgain[i].hintReward)
             assertEquals(missions[i].hammerReward, missionsAgain[i].hammerReward)
         }
 
         val soundManager = com.example.audio.SoundManager(context)
         prefs.hammerCount = 2
+        prefs.hintCount = 1
         prefs.coinsBalance = 25
         prefs.totalCoinsEarned = 25
         val viewModel = com.example.viewmodel.GameViewModel(context, soundManager, prefs)
@@ -265,15 +267,15 @@ class ExampleRobolectricTest {
         assertFalse(singleMoveMission.isCompleted)
         assertFalse(singleMoveMission.isClaimed)
 
-        // Clearing 1 line across separate moves must NOT accumulate to 3 for single-move objective
-        viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 1)
-        viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 1)
-        val afterSingleLines = viewModel.gameState.value.dailyMissions.first { it.id == singleMoveMission.id }
-        assertEquals(1, afterSingleLines.current)
-        assertFalse(afterSingleLines.isCompleted)
-
-        // Clearing 3 lines in one move completes the mission
+        // Clearing 3 lines in one move must NOT complete the 5-line single-move challenge
         viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 3)
+        viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 2)
+        val afterPartialMoves = viewModel.gameState.value.dailyMissions.first { it.id == singleMoveMission.id }
+        assertEquals(3, afterPartialMoves.current)
+        assertFalse(afterPartialMoves.isCompleted)
+
+        // Clearing 5 lines in one move completes the mission
+        viewModel.recordMissionEvent(com.example.model.MissionType.CLEAR_LINES_SINGLE_MOVE, 5)
         val stateAfterEvent = viewModel.gameState.value
         val updatedMission = stateAfterEvent.dailyMissions.first { it.id == singleMoveMission.id }
         assertTrue(updatedMission.isCompleted)
@@ -286,8 +288,9 @@ class ExampleRobolectricTest {
             .first { it.type == com.example.model.MissionType.SCORE_POINTS }
         assertTrue(scoreMission.isCompleted)
 
-        // Claim reward grants both bonus coins and hammer reward
+        // Claim reward grants bonus coins, hints, and hammer reward
         val initialCoins = stateAfterEvent.coinsBalance
+        val initialHints = stateAfterEvent.hintCount
         val initialHammers = stateAfterEvent.hammerCount
         val claimed = viewModel.claimMissionReward(singleMoveMission.id)
         assertTrue(claimed)
@@ -296,9 +299,19 @@ class ExampleRobolectricTest {
         assertEquals(initialCoins + singleMoveMission.coinReward, stateAfterClaim.coinsBalance)
         assertEquals(initialCoins + singleMoveMission.coinReward, prefs.coinsBalance)
         assertEquals(25 + singleMoveMission.coinReward, prefs.totalCoinsEarned)
+        assertEquals(initialHints + singleMoveMission.hintReward, stateAfterClaim.hintCount)
+        assertEquals(initialHints + singleMoveMission.hintReward, prefs.hintCount)
         assertEquals(initialHammers + singleMoveMission.hammerReward, stateAfterClaim.hammerCount)
         assertEquals(initialHammers + singleMoveMission.hammerReward, prefs.hammerCount)
         assertTrue(stateAfterClaim.dailyMissions.first { it.id == singleMoveMission.id }.isClaimed)
+
+        // Using a Hint highlights a valid best move and decrements hintCount
+        val hintUsed = viewModel.useHint()
+        assertTrue(hintUsed)
+        val stateAfterHint = viewModel.gameState.value
+        assertEquals(initialHints + singleMoveMission.hintReward - 1, stateAfterHint.hintCount)
+        assertTrue(stateAfterHint.activeHint != null)
+        assertTrue(stateAfterHint.hoverPreviewCells.isNotEmpty())
     }
 
     @Test
@@ -686,5 +699,27 @@ class ExampleRobolectricTest {
         )
         assertTrue(freshVm.gameState.value.achievements.first { it.id == "combo_10" }.isUnlocked)
         assertTrue(freshVm.gameState.value.achievements.first { it.id == "high_scorer" }.isUnlocked)
+    }
+
+    @Test
+    fun `test ad coordinator initializes safely and handles unready rewarded ad without crashing`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val coordinator = com.example.ads.AdMobRewardedCoordinator(context)
+        assertFalse(coordinator.adState.value.isRewardedAdReady)
+        assertFalse(coordinator.adState.value.isAdShowing)
+
+        // Calling preload when consent hasn't been granted yet must be a safe no-op
+        coordinator.preloadRewardedAd()
+        assertFalse(coordinator.adState.value.isAdShowing)
+    }
+
+    @Test
+    fun `test MainActivity onCreate and ad initialization complete without crashing`() {
+        val activity = org.robolectric.Robolectric.buildActivity(MainActivity::class.java)
+            .create()
+            .get()
+        assertFalse(activity.isFinishing)
+        assertFalse(activity.isDestroyed)
+        activity.finish()
     }
 }

@@ -330,6 +330,8 @@ fun GameScreen(
                 dailyPuzzleTitle = gameState.dailyPuzzleTitle,
                 hammerCount = gameState.hammerCount,
                 isHammerActive = gameState.isHammerActive,
+                hintCount = gameState.hintCount,
+                isHintActive = gameState.activeHint != null,
                 unclaimedMissions = gameState.unclaimedMissionsCount,
                 coinsBalance = gameState.coinsBalance,
                 loginStreak = gameState.loginStreak,
@@ -369,6 +371,7 @@ fun GameScreen(
                         viewModel.toggleHammerMode()
                     }
                 },
+                onUseHint = { viewModel.useHint() },
                 onShowMissions = { showMissionsDrawer = true },
                 onShowDailyRewards = { showLoginRewardDialog = true },
                 onSwitchMode = { mode -> viewModel.switchGameMode(mode) },
@@ -403,9 +406,14 @@ fun GameScreen(
                             if (gameState.isHammerActive) {
                                 viewModel.useHammerOnCell(row, col)
                             } else {
-                                val selectedIndex = gameState.selectedShapeIndex
-                                if (selectedIndex != null) {
-                                    viewModel.placeShape(selectedIndex, row, col)
+                                val hint = gameState.activeHint
+                                if (hint != null && Pair(row, col) in hint.cells) {
+                                    viewModel.placeShape(hint.pieceIndex, hint.row, hint.col)
+                                } else {
+                                    val selectedIndex = gameState.selectedShapeIndex
+                                    if (selectedIndex != null) {
+                                        viewModel.placeShape(selectedIndex, row, col)
+                                    }
                                 }
                             }
                         },
@@ -723,6 +731,7 @@ fun GameScreen(
             visible = showMissionsDrawer,
             missions = gameState.dailyMissions,
             coinsBalance = gameState.coinsBalance,
+            hintCount = gameState.hintCount,
             hammerCount = gameState.hammerCount,
             onClaimReward = { missionId -> viewModel.claimMissionReward(missionId) },
             onDismiss = { showMissionsDrawer = false }

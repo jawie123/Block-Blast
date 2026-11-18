@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.blockblast.qkpz"
     minSdk = 24
     targetSdk = 36
-    versionCode = 7
-    versionName = "7.0"
+    versionCode = 8
+    versionName = "8.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -124,6 +124,7 @@ dependencies {
   implementation(libs.googleid)
   implementation(libs.play.services.ads)
   implementation(libs.user.messaging.platform)
+  implementation(libs.androidx.work.runtime)
   // implementation(libs.firebase.appcheck.recaptcha)
   // implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)

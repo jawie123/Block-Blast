@@ -85,6 +85,7 @@ fun DailyMissionsDrawer(
     visible: Boolean,
     missions: List<DailyMission>,
     coinsBalance: Int,
+    hintCount: Int = 0,
     hammerCount: Int,
     onClaimReward: (missionId: String) -> Unit,
     onDismiss: () -> Unit,
@@ -199,7 +200,7 @@ fun DailyMissionsDrawer(
                         )
                         .statusBarsPadding()
                         .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     // Header row
                     Row(
@@ -210,12 +211,12 @@ fun DailyMissionsDrawer(
                         Row(
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(9.dp))
                                     .background(
                                         Brush.linearGradient(
                                             listOf(GoldAccent, Color(0xFFFF6D00))
@@ -223,7 +224,7 @@ fun DailyMissionsDrawer(
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(text = "🎯", fontSize = 18.sp)
+                                Text(text = "🎯", fontSize = 16.sp)
                             }
                             Column {
                                 Text(
@@ -236,7 +237,7 @@ fun DailyMissionsDrawer(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "Complete goals for bonus coins!",
+                                    text = "Complete goals for bonus coins & hints!",
                                     fontSize = 11.sp,
                                     color = Color(0xFF9FB0CC),
                                     maxLines = 1,
@@ -260,88 +261,90 @@ fun DailyMissionsDrawer(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                    // Wallet & Daily Progress Strip
+                    // Wallet & Daily Progress Strip (Coins, Hints, Hammers)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column(
+                        Row(
                             modifier = Modifier
-                                .weight(1.1f)
-                                .clip(RoundedCornerShape(12.dp))
+                                .weight(1.05f)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF10162B))
-                                .border(1.dp, GoldAccent.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                                .testTag("missions_drawer_coins_balance")
+                                .border(1.dp, GoldAccent.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .testTag("missions_drawer_coins_balance"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(text = "🪙", fontSize = 14.sp)
-                                Text(
-                                    text = "$coinsBalance",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = GoldAccent,
-                                    maxLines = 1,
-                                    modifier = Modifier.testTag("missions_drawer_coins_value")
-                                )
-                            }
+                            Text(text = "🪙", fontSize = 12.sp)
                             Text(
-                                text = "BLAST COINS",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF8E9BB0),
-                                letterSpacing = 0.4.sp
+                                text = "$coinsBalance",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                color = GoldAccent,
+                                maxLines = 1,
+                                modifier = Modifier.testTag("missions_drawer_coins_value")
                             )
                         }
 
-                        Column(
+                        Row(
                             modifier = Modifier
-                                .weight(0.9f)
-                                .clip(RoundedCornerShape(12.dp))
+                                .weight(0.95f)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF10162B))
-                                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                                .testTag("missions_drawer_hammer_balance")
+                                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .testTag("missions_drawer_hint_balance"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(text = "🔨", fontSize = 14.sp)
-                                Text(
-                                    text = "$hammerCount",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color(0xFF80D8FF),
-                                    maxLines = 1,
-                                    modifier = Modifier.testTag("missions_drawer_hammer_value")
-                                )
-                            }
+                            Text(text = "💡", fontSize = 12.sp)
                             Text(
-                                text = "HAMMERS",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF8E9BB0),
-                                letterSpacing = 0.4.sp
+                                text = "$hintCount",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF80D8FF),
+                                maxLines = 1,
+                                modifier = Modifier.testTag("missions_drawer_hint_value")
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1.0f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF10162B))
+                                .border(1.dp, Color(0xFFFFB74D).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .testTag("missions_drawer_hammer_balance"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(text = "🔨", fontSize = 12.sp)
+                            Text(
+                                text = "$hammerCount",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFFFCC80),
+                                maxLines = 1,
+                                modifier = Modifier.testTag("missions_drawer_hammer_value")
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Overall Daily Progress Pill
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(Color(0xFF101526))
-                            .border(1.dp, BoardBorder, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .border(1.dp, BoardBorder, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -366,18 +369,18 @@ fun DailyMissionsDrawer(
                                 }
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(6.dp)
+                                .height(5.dp)
                                 .clip(RoundedCornerShape(3.dp))
                                 .background(Color(0xFF1E2640))
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth(dailyCompletionFraction)
-                                    .height(6.dp)
+                                    .height(5.dp)
                                     .clip(RoundedCornerShape(3.dp))
                                     .background(
                                         Brush.horizontalGradient(
@@ -388,7 +391,7 @@ fun DailyMissionsDrawer(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Scrollable Missions Feed
                     LazyColumn(
@@ -396,7 +399,7 @@ fun DailyMissionsDrawer(
                             .weight(1f)
                             .fillMaxWidth()
                             .testTag("missions_drawer_list"),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(bottom = 8.dp)
                     ) {
                         items(missions, key = { it.id }) { mission ->
@@ -406,27 +409,26 @@ fun DailyMissionsDrawer(
                                 onClaimReward = { onClaimReward(mission.id) }
                             )
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Done Button
-                    Button(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("dismiss_missions_button"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E2640))
-                    ) {
-                        Text(
-                            text = "BACK TO GAME",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
+                        item(key = "dismiss_footer") {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = onDismiss,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("dismiss_missions_button"),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E2640))
+                            ) {
+                                Text(
+                                    text = "BACK TO GAME",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -474,80 +476,101 @@ private fun DailyMissionCard(
                 color = if (mission.isCompleted && !mission.isClaimed) GoldAccent else BoardBorder,
                 shape = RoundedCornerShape(16.dp)
             )
-            .padding(12.dp)
+            .padding(10.dp)
             .testTag("mission_item_${mission.id}")
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            // Top row: Icon + Title/Description + Bonus Coin Reward Pill
+            // Top row: Icon + Title/Description (full width so text never wraps awkwardly)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(accentColor.copy(alpha = 0.16f))
+                        .border(1.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(accentColor.copy(alpha = 0.16f))
-                            .border(1.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = mission.title,
-                            tint = accentColor,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = mission.title,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = mission.description,
-                            fontSize = 11.sp,
-                            color = Color(0xFF9FB0CC),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = mission.title,
+                        tint = accentColor,
+                        modifier = Modifier.size(15.dp)
+                    )
                 }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = mission.title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = mission.description,
+                        fontSize = 11.sp,
+                        color = Color(0xFF9FB0CC),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
 
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(start = 6.dp)
-                ) {
+            // Horizontal Reward Chips Strip
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (mission.coinReward > 0) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(7.dp))
                             .background(GoldAccent.copy(alpha = 0.16f))
-                            .border(1.dp, GoldAccent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                            .border(1.dp, GoldAccent.copy(alpha = 0.55f), RoundedCornerShape(7.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "+${mission.coinReward} 🪙",
-                            fontSize = 11.sp,
+                            text = "+${mission.coinReward} Coins",
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Black,
                             color = GoldAccent
                         )
                     }
-                    if (mission.hammerReward > 0) {
+                }
+                if (mission.hintReward > 0) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.55f), RoundedCornerShape(7.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
                         Text(
-                            text = "+${mission.hammerReward} 🔨",
+                            text = "+${mission.hintReward} Hints",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF80D8FF)
+                        )
+                    }
+                }
+                if (mission.hammerReward > 0) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(Color(0xFFFF9800).copy(alpha = 0.14f))
+                            .border(1.dp, Color(0xFFFFB74D).copy(alpha = 0.5f), RoundedCornerShape(7.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "+${mission.hammerReward} Hammer",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFFFB74D)
@@ -615,6 +638,11 @@ private fun DailyMissionCard(
                 }
 
                 mission.isCompleted -> {
+                    val rewardTokens = buildList {
+                        if (mission.coinReward > 0) add("+${mission.coinReward} 🪙")
+                        if (mission.hintReward > 0) add("+${mission.hintReward} 💡")
+                        if (mission.hammerReward > 0) add("+${mission.hammerReward} 🔨")
+                    }.joinToString(" & ")
                     Button(
                         onClick = onClaimReward,
                         modifier = Modifier
@@ -634,11 +662,7 @@ private fun DailyMissionCard(
                         ) {
                             Text(text = "🎁", fontSize = 13.sp)
                             Text(
-                                text = if (mission.hammerReward > 0) {
-                                    "CLAIM +${mission.coinReward} 🪙 & +${mission.hammerReward} 🔨"
-                                } else {
-                                    "CLAIM +${mission.coinReward} 🪙"
-                                },
+                                text = "CLAIM $rewardTokens",
                                 color = Color(0xFF121420),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Black

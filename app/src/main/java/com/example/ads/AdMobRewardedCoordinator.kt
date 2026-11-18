@@ -13,6 +13,7 @@ import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.ump.ConsentInformation
 import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,57 +35,83 @@ class AdMobRewardedCoordinator(
 ) : RewardedAdController {
 
     private val appContext = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val consentInformation: ConsentInformation =
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e(TAG, "Unhandled AdMob coroutine error", throwable)
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + exceptionHandler)
+    private val consentInformation: ConsentInformation? = try {
         UserMessagingPlatform.getConsentInformation(appContext)
+    } catch (t: Throwable) {
+        Log.e(TAG, "Failed to obtain UMP ConsentInformation", t)
+        null
+    }
     private val isMobileAdsInitStarted = AtomicBoolean(false)
 
     private var currentRewardedAd: RewardedAd? = null
 
     private val _adState = MutableStateFlow(
         AdUiState(
-            isPrivacyOptionsRequired = consentInformation.privacyOptionsRequirementStatus ==
-                ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+            isPrivacyOptionsRequired = try {
+                consentInformation?.privacyOptionsRequirementStatus ==
+                    ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to read privacy options status", t)
+                false
+            }
         )
     )
     override val adState: StateFlow<AdUiState> = _adState.asStateFlow()
 
     override fun initializeAndGatherConsent(activity: Activity) {
-        val params = ConsentRequestParameters.Builder().build()
+        val consent = consentInformation ?: return
+        try {
+            val params = ConsentRequestParameters.Builder().build()
 
-        consentInformation.requestConsentInfoUpdate(
-            activity,
-            params,
-            {
-                if (activity.isFinishing || activity.isDestroyed) return@requestConsentInfoUpdate
-                UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { loadAndShowError ->
-                    if (loadAndShowError != null) {
-                        Log.w(TAG, "UMP consent form error: ${loadAndShowError.message}")
+            consent.requestConsentInfoUpdate(
+                activity,
+                params,
+                {
+                    if (activity.isFinishing || activity.isDestroyed) return@requestConsentInfoUpdate
+                    try {
+                        UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { loadAndShowError ->
+                            if (loadAndShowError != null) {
+                                Log.w(TAG, "UMP consent form error: ${loadAndShowError.message}")
+                            }
+                            refreshPrivacyRequirement()
+                            if (runCatching { consent.canRequestAds() }.getOrDefault(false)) {
+                                initializeMobileAdsSdk()
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Failed to load/show consent form", t)
                     }
+                },
+                { requestConsentError ->
+                    Log.w(TAG, "UMP consent update failed: ${requestConsentError.message}")
                     refreshPrivacyRequirement()
-                    if (consentInformation.canRequestAds()) {
+                    if (runCatching { consent.canRequestAds() }.getOrDefault(false)) {
                         initializeMobileAdsSdk()
                     }
                 }
-            },
-            { requestConsentError ->
-                Log.w(TAG, "UMP consent update failed: ${requestConsentError.message}")
-                refreshPrivacyRequirement()
-                if (consentInformation.canRequestAds()) {
-                    initializeMobileAdsSdk()
-                }
-            }
-        )
+            )
 
-        // If consent was already obtained in an earlier session, initialize immediately in background
-        if (consentInformation.canRequestAds()) {
-            initializeMobileAdsSdk()
+            // If consent was already obtained in an earlier session, initialize immediately in background
+            if (runCatching { consent.canRequestAds() }.getOrDefault(false)) {
+                initializeMobileAdsSdk()
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to initialize UMP consent flow", t)
         }
     }
 
     private fun refreshPrivacyRequirement() {
-        val required = consentInformation.privacyOptionsRequirementStatus ==
-            ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+        val required = try {
+            consentInformation?.privacyOptionsRequirementStatus ==
+                ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to refresh privacy requirement", t)
+            false
+        }
         _adState.update { it.copy(isPrivacyOptionsRequired = required) }
     }
 
@@ -97,50 +124,67 @@ class AdMobRewardedCoordinator(
         }
 
         scope.launch {
-            withContext(Dispatchers.IO) {
-                MobileAds.initialize(appContext) {
-                    scope.launch {
-                        preloadRewardedAd()
+            try {
+                withContext(Dispatchers.IO) {
+                    MobileAds.initialize(appContext) {
+                        scope.launch {
+                            preloadRewardedAd()
+                        }
                     }
                 }
+            } catch (t: Throwable) {
+                Log.e(TAG, "MobileAds.initialize failed", t)
+                isMobileAdsInitStarted.set(false)
             }
         }
     }
 
     override fun preloadRewardedAd() {
-        if (!consentInformation.canRequestAds()) return
+        val consent = consentInformation ?: return
+        if (!runCatching { consent.canRequestAds() }.getOrDefault(false)) return
         if (currentRewardedAd != null || _adState.value.isRewardedAdLoading) return
 
         _adState.update { it.copy(isRewardedAdLoading = true) }
 
-        val adRequest = AdRequest.Builder().build()
-        RewardedAd.load(
-            appContext,
-            rewardedAdUnitId,
-            adRequest,
-            object : RewardedAdLoadCallback() {
-                override fun onAdLoaded(ad: RewardedAd) {
-                    currentRewardedAd = ad
-                    _adState.update {
-                        it.copy(
-                            isRewardedAdReady = true,
-                            isRewardedAdLoading = false
-                        )
+        try {
+            val adRequest = AdRequest.Builder().build()
+            RewardedAd.load(
+                appContext,
+                rewardedAdUnitId,
+                adRequest,
+                object : RewardedAdLoadCallback() {
+                    override fun onAdLoaded(ad: RewardedAd) {
+                        currentRewardedAd = ad
+                        _adState.update {
+                            it.copy(
+                                isRewardedAdReady = true,
+                                isRewardedAdLoading = false
+                            )
+                        }
                     }
-                }
 
-                override fun onAdFailedToLoad(loadAdError: LoadAdError) {
-                    Log.w(TAG, "RewardedAd failed to load: ${loadAdError.message}")
-                    currentRewardedAd = null
-                    _adState.update {
-                        it.copy(
-                            isRewardedAdReady = false,
-                            isRewardedAdLoading = false
-                        )
+                    override fun onAdFailedToLoad(loadAdError: LoadAdError) {
+                        Log.w(TAG, "RewardedAd failed to load: ${loadAdError.message}")
+                        currentRewardedAd = null
+                        _adState.update {
+                            it.copy(
+                                isRewardedAdReady = false,
+                                isRewardedAdLoading = false
+                            )
+                        }
                     }
                 }
+            )
+        } catch (t: Throwable) {
+            Log.e(TAG, "RewardedAd.load threw exception", t)
+            currentRewardedAd = null
+            _adState.update {
+                it.copy(
+                    isRewardedAdReady = false,
+                    isRewardedAdLoading = false
+                )
             }
-        )
+        }
     }
 
     override fun showRewardedAd(
@@ -155,9 +199,10 @@ class AdMobRewardedCoordinator(
             return
         }
 
+        val consent = consentInformation
         val ad = currentRewardedAd
         if (ad == null) {
-            if (consentInformation.canRequestAds()) {
+            if (consent != null && runCatching { consent.canRequestAds() }.getOrDefault(false)) {
                 initializeMobileAdsSdk()
                 preloadRewardedAd()
                 onAdClosedOrFailed("Ad is loading — please try again in a moment.")
@@ -178,29 +223,39 @@ class AdMobRewardedCoordinator(
         onAdStarted()
 
         var finishedNotified = false
-        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-            override fun onAdDismissedFullScreenContent() {
-                _adState.update { it.copy(isAdShowing = false) }
-                if (!finishedNotified) {
-                    finishedNotified = true
-                    onAdClosedOrFailed(null)
+        try {
+            ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+                override fun onAdDismissedFullScreenContent() {
+                    _adState.update { it.copy(isAdShowing = false) }
+                    if (!finishedNotified) {
+                        finishedNotified = true
+                        onAdClosedOrFailed(null)
+                    }
+                    preloadRewardedAd()
                 }
-                preloadRewardedAd()
+
+                override fun onAdFailedToShowFullScreenContent(adError: AdError) {
+                    Log.w(TAG, "RewardedAd failed to show: ${adError.message}")
+                    _adState.update { it.copy(isAdShowing = false) }
+                    if (!finishedNotified) {
+                        finishedNotified = true
+                        onAdClosedOrFailed("Unable to display ad right now. Try again shortly.")
+                    }
+                    preloadRewardedAd()
+                }
             }
 
-            override fun onAdFailedToShowFullScreenContent(adError: AdError) {
-                Log.w(TAG, "RewardedAd failed to show: ${adError.message}")
-                _adState.update { it.copy(isAdShowing = false) }
-                if (!finishedNotified) {
-                    finishedNotified = true
-                    onAdClosedOrFailed("Unable to display ad right now. Try again shortly.")
-                }
-                preloadRewardedAd()
+            ad.show(activity) {
+                onRewardEarned(rewardType)
             }
-        }
-
-        ad.show(activity) {
-            onRewardEarned(rewardType)
+        } catch (t: Throwable) {
+            Log.e(TAG, "RewardedAd.show threw exception", t)
+            _adState.update { it.copy(isAdShowing = false) }
+            if (!finishedNotified) {
+                finishedNotified = true
+                onAdClosedOrFailed("Unable to display ad right now. Try again shortly.")
+            }
+            preloadRewardedAd()
         }
     }
 
@@ -208,12 +263,17 @@ class AdMobRewardedCoordinator(
         activity: Activity,
         onComplete: (String?) -> Unit
     ) {
-        UserMessagingPlatform.showPrivacyOptionsForm(activity) { formError ->
-            refreshPrivacyRequirement()
-            if (consentInformation.canRequestAds()) {
-                initializeMobileAdsSdk()
+        try {
+            UserMessagingPlatform.showPrivacyOptionsForm(activity) { formError ->
+                refreshPrivacyRequirement()
+                if (runCatching { consentInformation?.canRequestAds() == true }.getOrDefault(false)) {
+                    initializeMobileAdsSdk()
+                }
+                onComplete(formError?.message)
             }
-            onComplete(formError?.message)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to show privacy options form", t)
+            onComplete(t.localizedMessage ?: "Privacy options unavailable.")
         }
     }
 

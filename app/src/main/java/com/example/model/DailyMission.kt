@@ -19,6 +19,7 @@ data class DailyMission(
     val isCompleted: Boolean = false,
     val isClaimed: Boolean = false,
     val coinReward: Int = 50,
+    val hintReward: Int = 0,
     val hammerReward: Int = 1
 ) {
     val progressFraction: Float
@@ -30,29 +31,31 @@ object DailyMissionGenerator {
         val seed = dateStr.filter { it.isDigit() }.toLongOrNull() ?: 20261112L
         val random = java.util.Random(seed)
 
-        // 1. Signature Single-Move Multi-Line Blast mission
+        // 1. Signature Single-Move Mega Line Blast mission (Coins + Hints)
         val m1 = DailyMission(
             id = "mission_single_move_lines_$dateStr",
-            title = "Triple Line Blast",
-            description = "Clear 3 lines in one move",
+            title = "Mega Line Blast",
+            description = "Clear 5 lines in one move",
             type = MissionType.CLEAR_LINES_SINGLE_MOVE,
-            target = 3,
-            coinReward = 100,
+            target = 5,
+            coinReward = 150,
+            hintReward = 2,
             hammerReward = 1
         )
 
-        // 2. Signature Score Milestone mission
+        // 2. Signature Score Milestone mission (Extra Coins)
         val m2 = DailyMission(
             id = "mission_score_1000_$dateStr",
             title = "Point Milestone",
-            description = "Reach 1,000 points in a game",
+            description = "Reach a score of 1000",
             type = MissionType.SCORE_POINTS,
             target = 1000,
-            coinReward = 75,
+            coinReward = 100,
+            hintReward = 0,
             hammerReward = 1
         )
 
-        // 3. Rotating Line Sweeper or Combo Master mission
+        // 3. Rotating Line Sweeper or Combo Master mission (Extra Hints)
         val isLineSweep = random.nextBoolean()
         val m3 = if (isLineSweep) {
             val lineTargets = listOf(5, 7, 10)
@@ -63,7 +66,8 @@ object DailyMissionGenerator {
                 description = "Clear $lineTarget rows or columns today",
                 type = MissionType.CLEAR_LINES,
                 target = lineTarget,
-                coinReward = 50 + (lineTarget * 5),
+                coinReward = 0,
+                hintReward = 2,
                 hammerReward = 1
             )
         } else {
@@ -74,12 +78,13 @@ object DailyMissionGenerator {
                 description = "Achieve a ${comboTarget}x combo streak",
                 type = MissionType.REACH_COMBO,
                 target = comboTarget,
-                coinReward = comboTarget * 25,
+                coinReward = 0,
+                hintReward = 2,
                 hammerReward = 1
             )
         }
 
-        // 4. Rotating Block Builder or Hammer Smash mission
+        // 4. Rotating Block Builder or Hammer Smash mission (Coins + Hint)
         val isPlacement = random.nextBoolean()
         val m4 = if (isPlacement) {
             val blockTargets = listOf(15, 20, 25)
@@ -91,6 +96,7 @@ object DailyMissionGenerator {
                 type = MissionType.PLACE_BLOCKS,
                 target = blockTarget,
                 coinReward = 50,
+                hintReward = 1,
                 hammerReward = 1
             )
         } else {
@@ -101,6 +107,7 @@ object DailyMissionGenerator {
                 type = MissionType.USE_HAMMER,
                 target = 1,
                 coinReward = 60,
+                hintReward = 1,
                 hammerReward = 1
             )
         }

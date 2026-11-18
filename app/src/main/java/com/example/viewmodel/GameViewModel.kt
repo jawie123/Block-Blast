@@ -25,6 +25,7 @@ import com.example.model.GameOverReason
 import com.example.model.GameState
 import com.example.model.LineClearBurst
 import com.example.model.MissionType
+import com.example.model.PlacementHint
 import com.example.model.SavedGameSessionData
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
@@ -330,6 +331,8 @@ class GameViewModel(
             canUndo = false,
             hammerCount = session.hammerCount,
             isHammerActive = false,
+            hintCount = preferences.hintCount,
+            activeHint = null,
             dailyMissions = dailyMissions,
             unclaimedMissionsCount = unclaimedCount,
             difficultyLevel = resumedTier.level,
@@ -729,6 +732,8 @@ class GameViewModel(
             canUndo = false,
             hammerCount = currentHammers,
             isHammerActive = false,
+            hintCount = preferences.hintCount,
+            activeHint = null,
             dailyMissions = dailyMissions,
             unclaimedMissionsCount = unclaimedCount,
             difficultyLevel = DifficultyTier.STARTER.level,
@@ -859,6 +864,7 @@ class GameViewModel(
                 timeRemainingMs = snapshot.timeRemainingMs,
                 lastTimeBonusSeconds = 0,
                 isHammerActive = false,
+                activeHint = null,
                 selectedShapeIndex = null,
                 hoverRow = null,
                 hoverCol = null,
@@ -933,6 +939,9 @@ class GameViewModel(
         _gameState.update {
             it.copy(
                 selectedShapeIndex = index,
+                activeHint = null,
+                hoverRow = null,
+                hoverCol = null,
                 hoverPreviewCells = emptySet(),
                 prospectiveRows = emptySet(),
                 prospectiveCols = emptySet()
@@ -1085,6 +1094,7 @@ class GameViewModel(
                 it.copy(
                     hoverRow = targetRow,
                     hoverCol = targetCol,
+                    activeHint = null,
                     hoverPreviewCells = previewCells,
                     prospectiveRows = prospectiveRows,
                     prospectiveCols = prospectiveCols
@@ -1095,6 +1105,7 @@ class GameViewModel(
                 it.copy(
                     hoverRow = targetRow,
                     hoverCol = targetCol,
+                    activeHint = null,
                     hoverPreviewCells = emptySet(),
                     prospectiveRows = emptySet(),
                     prospectiveCols = emptySet()
@@ -1384,6 +1395,7 @@ class GameViewModel(
                 gameOverReason = if (isGameOver) GameOverReason.NO_MOVES else it.gameOverReason,
                 isNewHighScore = isNewRecord,
                 selectedShapeIndex = null,
+                activeHint = null,
                 hoverRow = null,
                 hoverCol = null,
                 hoverPreviewCells = emptySet(),
@@ -1586,6 +1598,10 @@ class GameViewModel(
             it.copy(
                 isHammerActive = willBeActive,
                 selectedShapeIndex = if (willBeActive) null else it.selectedShapeIndex,
+                activeHint = if (willBeActive) null else it.activeHint,
+                hoverPreviewCells = if (willBeActive) emptySet() else it.hoverPreviewCells,
+                prospectiveRows = if (willBeActive) emptySet() else it.prospectiveRows,
+                prospectiveCols = if (willBeActive) emptySet() else it.prospectiveCols,
                 comboBannerText = if (willBeActive) "HAMMER ACTIVE: TAP ANY FILLED BLOCK!" else null
             )
         }
@@ -1594,6 +1610,162 @@ class GameViewModel(
             soundManager.playPickup()
             triggerHaptic(HapticEffect.Pickup)
         }
+    }
+
+    fun useHint(): Boolean {
+        val current = _gameState.value
+        if (current.isGameOver) return false
+
+        // If a hint is already highlighted for the current turn, re-display the banner without spending another hint
+        val existingHint = current.activeHint
+        if (existingHint != null) {
+            val hintMsg = if (existingHint.clearedLines > 0) {
+                "💡 HINT: CLEARS ${existingHint.clearedLines} LINE${if (existingHint.clearedLines > 1) "S" else ""}!"
+            } else {
+                "💡 HINT: TAP HIGHLIGHTED CELLS TO PLACE!"
+            }
+            _gameState.update {
+                it.copy(
+                    selectedShapeIndex = existingHint.pieceIndex,
+                    comboBannerText = hintMsg
+                )
+            }
+            viewModelScope.launch {
+                delay(1500)
+                _gameState.update {
+                    if (it.comboBannerText == hintMsg) it.copy(comboBannerText = null) else it
+                }
+            }
+            return true
+        }
+
+        if (current.hintCount <= 0) {
+            val noHintBanner = "NO HINTS LEFT! COMPLETE DAILY MISSIONS"
+            _gameState.update { it.copy(comboBannerText = noHintBanner) }
+            viewModelScope.launch {
+                delay(1500)
+                _gameState.update {
+                    if (it.comboBannerText == noHintBanner) it.copy(comboBannerText = null) else it
+                }
+            }
+            return false
+        }
+
+        val bestHint = findBestPlacementHint(current.grid, current.activePieces) ?: return false
+        val newHintCount = (current.hintCount - 1).coerceAtLeast(0)
+        preferences.hintCount = newHintCount
+
+        val prospectiveRows = mutableSetOf<Int>()
+        val prospectiveCols = mutableSetOf<Int>()
+        for (r in 0 until 8) {
+            if ((0 until 8).all { c -> current.grid[r][c] != 0 || Pair(r, c) in bestHint.cells }) {
+                prospectiveRows.add(r)
+            }
+        }
+        for (c in 0 until 8) {
+            if ((0 until 8).all { r -> current.grid[r][c] != 0 || Pair(r, c) in bestHint.cells }) {
+                prospectiveCols.add(c)
+            }
+        }
+
+        val hintBanner = if (bestHint.clearedLines > 0) {
+            "💡 HINT: CLEARS ${bestHint.clearedLines} LINE${if (bestHint.clearedLines > 1) "S" else ""}!"
+        } else {
+            "💡 HINT: BEST MOVE HIGHLIGHTED!"
+        }
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        _gameState.update {
+            it.copy(
+                hintCount = newHintCount,
+                activeHint = bestHint,
+                isHammerActive = false,
+                selectedShapeIndex = bestHint.pieceIndex,
+                hoverRow = bestHint.row,
+                hoverCol = bestHint.col,
+                hoverPreviewCells = bestHint.cells,
+                prospectiveRows = prospectiveRows,
+                prospectiveCols = prospectiveCols,
+                comboBannerText = hintBanner
+            )
+        }
+
+        viewModelScope.launch {
+            delay(1800)
+            _gameState.update {
+                if (it.comboBannerText == hintBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    private fun findBestPlacementHint(
+        grid: List<List<Int>>,
+        activePieces: List<BlockShape?>
+    ): PlacementHint? {
+        var bestHint: PlacementHint? = null
+        var bestScore = Int.MIN_VALUE
+
+        for ((pieceIdx, shape) in activePieces.withIndex()) {
+            if (shape == null) continue
+            for (startR in 0..(8 - shape.height)) {
+                for (startC in 0..(8 - shape.width)) {
+                    if (!canPlaceShape(grid, shape, startR, startC)) continue
+
+                    val placedCells = HashSet<Pair<Int, Int>>(shape.cellCount)
+                    var neighborScore = 0
+                    for (dr in 0 until shape.height) {
+                        for (dc in 0 until shape.width) {
+                            if (shape.matrix[dr][dc]) {
+                                val rr = startR + dr
+                                val cc = startC + dc
+                                placedCells.add(Pair(rr, cc))
+                            }
+                        }
+                    }
+
+                    var fullRows = 0
+                    for (r in 0 until 8) {
+                        if ((0 until 8).all { c -> grid[r][c] != 0 || Pair(r, c) in placedCells }) {
+                            fullRows++
+                        }
+                    }
+                    var fullCols = 0
+                    for (c in 0 until 8) {
+                        if ((0 until 8).all { r -> grid[r][c] != 0 || Pair(r, c) in placedCells }) {
+                            fullCols++
+                        }
+                    }
+                    val totalCleared = fullRows + fullCols
+
+                    for ((rr, cc) in placedCells) {
+                        val dirs = arrayOf(-1 to 0, 1 to 0, 0 to -1, 0 to 1)
+                        for ((dr, dc) in dirs) {
+                            val nr = rr + dr
+                            val nc = cc + dc
+                            if (nr !in 0 until 8 || nc !in 0 until 8 || grid[nr][nc] != 0) {
+                                neighborScore += 25
+                            }
+                        }
+                    }
+
+                    val candidateScore = (totalCleared * 10_000) + neighborScore + (shape.cellCount * 10)
+                    if (candidateScore > bestScore) {
+                        bestScore = candidateScore
+                        bestHint = PlacementHint(
+                            pieceIndex = pieceIdx,
+                            row = startR,
+                            col = startC,
+                            cells = placedCells,
+                            clearedLines = totalCleared
+                        )
+                    }
+                }
+            }
+        }
+        return bestHint
     }
 
     fun activateHammerFromGameOver() {
@@ -1661,6 +1833,7 @@ class GameViewModel(
                 grid = frozenGrid,
                 hammerCount = newHammerCount,
                 isHammerActive = false,
+                activeHint = null,
                 isGameOver = stillGameOver,
                 lineClearBursts = listOf(burst),
                 comboBannerText = "BLOCK SMASHED! 🔨",
@@ -1762,6 +1935,9 @@ class GameViewModel(
         val newHammerCount = currentState.hammerCount + mission.hammerReward
         preferences.hammerCount = newHammerCount
 
+        val newHintCount = currentState.hintCount + mission.hintReward
+        preferences.hintCount = newHintCount
+
         val updatedMissions = currentState.dailyMissions.map {
             if (it.id == missionId) it.copy(isClaimed = true) else it
         }
@@ -1770,16 +1946,16 @@ class GameViewModel(
         soundManager.playPowerup()
         triggerHaptic(HapticEffect.PowerUp)
 
-        val rewardSummary = buildString {
-            if (mission.coinReward > 0) append("+${mission.coinReward} 🪙")
-            if (mission.coinReward > 0 && mission.hammerReward > 0) append(" & ")
-            if (mission.hammerReward > 0) append("+${mission.hammerReward} 🔨")
-        }
-        val claimedBanner = "MISSION CLAIMED: $rewardSummary!"
+        val rewardParts = mutableListOf<String>()
+        if (mission.coinReward > 0) rewardParts.add("+${mission.coinReward} 🪙")
+        if (mission.hintReward > 0) rewardParts.add("+${mission.hintReward} 💡")
+        if (mission.hammerReward > 0) rewardParts.add("+${mission.hammerReward} 🔨")
+        val claimedBanner = "MISSION CLAIMED: ${rewardParts.joinToString(" & ")}!"
 
         _gameState.update {
             it.copy(
                 coinsBalance = newCoinsBalance,
+                hintCount = newHintCount,
                 hammerCount = newHammerCount,
                 dailyMissions = updatedMissions,
                 unclaimedMissionsCount = unclaimed,

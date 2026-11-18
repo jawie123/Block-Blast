@@ -74,6 +74,10 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_HAMMER_COUNT, 3)
         set(value) = prefs.edit().putInt(KEY_HAMMER_COUNT, value).apply()
 
+    var hintCount: Int
+        get() = prefs.getInt(KEY_HINT_COUNT, 2).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_HINT_COUNT, value.coerceAtLeast(0)).apply()
+
     var totalAllTimeScore: Long
         get() = prefs.getLong(KEY_TOTAL_ALL_TIME_SCORE, 0L)
         set(value) = prefs.edit().putLong(KEY_TOTAL_ALL_TIME_SCORE, value.coerceAtLeast(0L)).apply()
@@ -202,6 +206,7 @@ class GamePreferences(context: Context) {
         private const val KEY_DAILY_STREAK = "key_daily_streak"
         private const val KEY_DAILY_HISTORY = "key_daily_history"
         private const val KEY_HAMMER_COUNT = "key_hammer_count"
+        private const val KEY_HINT_COUNT = "key_hint_count"
         private const val KEY_TOTAL_ALL_TIME_SCORE = "key_total_all_time_score"
         private const val KEY_TIME_ATTACK_HIGH_SCORE = "key_time_attack_high_score"
         private const val KEY_DAILY_CHALLENGES_COMPLETED = "key_daily_challenges_completed"
