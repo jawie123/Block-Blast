@@ -1,5 +1,6 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
 import java.util.UUID
 import kotlin.random.Random
 
@@ -35,6 +36,7 @@ enum class DifficultyTier(
     }
 }
 
+@Immutable
 data class BlockShape(
     val instanceId: String = UUID.randomUUID().toString(),
     val id: String,

@@ -1,5 +1,8 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class ScorePopup(
     val id: Long = System.nanoTime() + (0..9999).random(),
     val text: String,
@@ -20,6 +23,7 @@ enum class GameOverReason {
     TIME_UP
 }
 
+@Immutable
 data class LineClearBurst(
     val id: Long = System.nanoTime() + (0..9999).random(),
     val row: Int,
@@ -30,6 +34,7 @@ data class LineClearBurst(
     val isColClear: Boolean = false
 )
 
+@Immutable
 data class PlacementHint(
     val pieceIndex: Int,
     val row: Int,
@@ -38,6 +43,7 @@ data class PlacementHint(
     val clearedLines: Int = 0
 )
 
+@Immutable
 data class GameState(
     val grid: List<List<Int>> = List(8) { List(8) { 0 } },
     val activePieces: List<BlockShape?> = emptyList(),
@@ -73,6 +79,11 @@ data class GameState(
     val isHammerActive: Boolean = false,
     val hintCount: Int = 2,
     val activeHint: PlacementHint? = null,
+    val shuffleCount: Int = 2,
+    val bombCount: Int = 1,
+    val isBombActive: Boolean = false,
+    val selectedThemeId: String = BoardThemeId.NEON_ARCADE.name,
+    val unlockedThemeIds: Set<String> = setOf(BoardThemeId.NEON_ARCADE.name),
     val dailyMissions: List<DailyMission> = emptyList(),
     val unclaimedMissionsCount: Int = 0,
     val difficultyLevel: Int = 1,

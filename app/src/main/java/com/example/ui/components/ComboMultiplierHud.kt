@@ -146,18 +146,6 @@ fun ComboMultiplierHud(
         }
     }
 
-    // Ambient breathing glow while streak is live
-    val infiniteTransition = rememberInfiniteTransition(label = "combo_hud_glow")
-    val ambientPulse by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 650, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "combo_hud_ambient_pulse"
-    )
-
     AnimatedVisibility(
         visible = isVisible,
         enter = scaleIn(
@@ -170,10 +158,26 @@ fun ComboMultiplierHud(
         exit = scaleOut(targetScale = 0.6f, animationSpec = tween(180)) + fadeOut(tween(180)),
         modifier = modifier
     ) {
+        val ambientPulse = if (comboStreak > 0) {
+            val infiniteTransition = rememberInfiniteTransition(label = "combo_hud_glow")
+            val pulse by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.04f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "combo_hud_ambient_pulse"
+            )
+            pulse
+        } else {
+            1f
+        }
+
         Box(
             modifier = Modifier
                 .graphicsLayer {
-                    val combinedScale = popScale.value * if (comboStreak > 0) ambientPulse else 1f
+                    val combinedScale = popScale.value * ambientPulse
                     scaleX = combinedScale
                     scaleY = combinedScale
                     translationY = popOffsetY.value
@@ -208,18 +212,18 @@ fun ComboMultiplierHud(
                     brush = Brush.horizontalGradient(tierGradient),
                     shape = RoundedCornerShape(999.dp)
                 )
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .padding(horizontal = 10.dp, vertical = 4.dp)
                 .testTag("combo_multiplier_hud"),
             contentAlignment = Alignment.Center
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
                 // Tier Icon Pill
                 Box(
                     modifier = Modifier
-                        .size(26.dp)
+                        .size(22.dp)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(tierGradient)),
                     contentAlignment = Alignment.Center
@@ -232,7 +236,7 @@ fun ComboMultiplierHud(
                         },
                         contentDescription = "Combo Multiplier Icon",
                         tint = if (displayMultiplier >= 5) Color(0xFF121629) else Color.White,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                 }
 
@@ -251,7 +255,7 @@ fun ComboMultiplierHud(
                     Text(
                         text = "${mult}x",
                         color = tierAccent,
-                        fontSize = 20.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = (-0.5).sp,
                         modifier = Modifier.testTag("combo_hud_multiplier_text")
@@ -263,9 +267,9 @@ fun ComboMultiplierHud(
                     Text(
                         text = tierTitle,
                         color = Color.White,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 0.7.sp
+                        letterSpacing = 0.6.sp
                     )
                     val subLabel = when {
                         prospectiveLinesCount > 0 -> "+$prospectiveLinesCount LINE${if (prospectiveLinesCount > 1) "S" else ""} ON DROP"
@@ -275,7 +279,7 @@ fun ComboMultiplierHud(
                     Text(
                         text = subLabel,
                         color = tierAccent.copy(alpha = 0.9f),
-                        fontSize = 9.sp,
+                        fontSize = 8.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }

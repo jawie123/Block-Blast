@@ -6,6 +6,11 @@ import com.example.model.BlockShape
 import com.example.model.GameMode
 import com.example.model.SavedGameSessionData
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -13,22 +18,56 @@ import org.json.JSONObject
  * Local file storage for persisting active game sessions to app-private filesDir,
  * allowing instant resume on app launch even when offline.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class LocalSessionStorage(context: Context) {
 
     private val sessionFile = File(context.applicationContext.filesDir, FILE_NAME)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val writeLock = Any()
+    private var cachedRootJson: JSONObject? = null
 
     @Synchronized
     fun saveSession(session: SavedGameSessionData) {
         try {
-            val root = loadRootJson()
-            root.put(KEY_LAST_MODE, session.gameMode.name)
-            val sessionsObj = root.optJSONObject(KEY_SESSIONS) ?: JSONObject()
-            sessionsObj.put(session.gameMode.name, serializeSession(session))
-            root.put(KEY_SESSIONS, sessionsObj)
-            sessionFile.writeText(root.toString())
+            val payload = updateCachedSessionJson(session)
+            synchronized(writeLock) {
+                sessionFile.writeText(payload)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save local game session", e)
         }
+    }
+
+    /**
+     * Updates the in-memory session snapshot synchronously so any immediate reads stay consistent,
+     * then writes to disk off the Main thread on a serialized IO lane.
+     */
+    @Synchronized
+    fun saveSessionBackground(session: SavedGameSessionData) {
+        try {
+            val payload = updateCachedSessionJson(session)
+            ioScope.launch {
+                try {
+                    synchronized(writeLock) {
+                        sessionFile.writeText(payload)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to save local game session asynchronously", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to serialize local game session", e)
+        }
+    }
+
+    private fun updateCachedSessionJson(session: SavedGameSessionData): String {
+        val root = loadRootJson()
+        root.put(KEY_LAST_MODE, session.gameMode.name)
+        val sessionsObj = root.optJSONObject(KEY_SESSIONS) ?: JSONObject()
+        sessionsObj.put(session.gameMode.name, serializeSession(session))
+        root.put(KEY_SESSIONS, sessionsObj)
+        cachedRootJson = root
+        return root.toString()
     }
 
     @Synchronized
@@ -76,17 +115,31 @@ class LocalSessionStorage(context: Context) {
             val sessionsObj = root.optJSONObject(KEY_SESSIONS) ?: return
             sessionsObj.remove(mode.name)
             root.put(KEY_SESSIONS, sessionsObj)
-            sessionFile.writeText(root.toString())
+            cachedRootJson = root
+            val payload = root.toString()
+            ioScope.launch {
+                try {
+                    synchronized(writeLock) {
+                        sessionFile.writeText(payload)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to clear local session for $mode", e)
+                }
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to clear local session for $mode", e)
         }
     }
 
     private fun loadRootJson(): JSONObject {
-        if (!sessionFile.exists()) return JSONObject()
+        cachedRootJson?.let { return it }
+        if (!sessionFile.exists()) {
+            return JSONObject().also { cachedRootJson = it }
+        }
         val text = sessionFile.readText()
-        if (text.isBlank()) return JSONObject()
-        return JSONObject(text)
+        val parsed = if (text.isBlank()) JSONObject() else JSONObject(text)
+        cachedRootJson = parsed
+        return parsed
     }
 
     private fun serializeSession(session: SavedGameSessionData): JSONObject {

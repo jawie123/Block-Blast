@@ -43,8 +43,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.BlockShape
-import com.example.ui.theme.BoardBackground
-import com.example.ui.theme.BoardBorder
+import com.example.model.BoardThemeCatalog
+import com.example.model.BoardThemeSpec
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -63,6 +63,7 @@ fun PieceSlot(
     onDragMove: (delta: Offset) -> Unit,
     onDragEnd: () -> Unit,
     compactMode: Boolean = false,
+    theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -80,15 +81,15 @@ fun PieceSlot(
 
     Box(
         modifier = modifier
-            .height(if (compactMode) 68.dp else 96.dp)
+            .height(if (compactMode) 62.dp else 84.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(BoardBackground)
+            .background(theme.boardBackground)
             .border(
                 width = if (isSelected || isDragging) 2.dp else 1.dp,
                 color = when {
-                    isDragging -> Color(0xFF00E5FF).copy(alpha = 0.6f)
-                    isSelected -> Color(0xFF00E5FF)
-                    else -> BoardBorder
+                    isDragging -> theme.accentColor.copy(alpha = 0.6f)
+                    isSelected -> theme.accentColor
+                    else -> theme.boardBorder
                 },
                 shape = RoundedCornerShape(12.dp)
             )
@@ -170,9 +171,16 @@ fun PieceSlot(
                         if (isDragging) 0f else if (canFit) 1.0f else 0.38f
                     )
                 ) {
+                    val maxDim = maxOf(shape.width, shape.height)
+                    val unitDp = when {
+                        maxDim >= 5 -> if (compactMode) 10.dp else 14.dp
+                        maxDim == 4 -> if (compactMode) 11.dp else 15.dp
+                        else -> if (compactMode) 12.dp else 16.dp
+                    }
                     ShapeRenderer(
                         shape = shape,
-                        cellUnitDp = if (compactMode) 13.dp else 18.dp
+                        cellUnitDp = unitDp,
+                        theme = theme
                     )
                 }
             }
@@ -212,13 +220,14 @@ fun PieceDeck(
     onDragMove: (delta: Offset) -> Unit,
     onDragEnd: () -> Unit,
     compactMode: Boolean = false,
+    theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (compactMode) 76.dp else 106.dp)
-            .padding(horizontal = 12.dp, vertical = if (compactMode) 2.dp else 4.dp),
+            .height(if (compactMode) 68.dp else 90.dp)
+            .padding(horizontal = 12.dp, vertical = if (compactMode) 2.dp else 3.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -234,6 +243,7 @@ fun PieceDeck(
                 onDragMove = onDragMove,
                 onDragEnd = onDragEnd,
                 compactMode = compactMode,
+                theme = theme,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -244,6 +254,7 @@ fun PieceDeck(
 fun ShapeRenderer(
     shape: BlockShape,
     cellUnitDp: Dp = 22.dp,
+    theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -261,6 +272,7 @@ fun ShapeRenderer(
                         Box(modifier = Modifier.size(cellUnitDp)) {
                             BlockCell(
                                 colorId = shape.colorId,
+                                theme = theme,
                                 cornerRadius = 4.dp
                             )
                         }

@@ -74,8 +74,12 @@ import com.example.ads.findActivity
 import com.example.audio.AppHaptics
 import com.example.audio.HapticEffect
 import com.example.model.BlockShape
+import com.example.model.BoardThemeCatalog
+import com.example.model.BoardThemeSpec
 import com.example.model.DailyLoginRewardSchedule
 import com.example.model.GameMode
+import com.example.model.ShopBoosterType
+import com.example.ui.components.BoosterBar
 import com.example.ui.components.ComboMultiplierHud
 import com.example.ui.components.DailyLeaderboardDialog
 import com.example.ui.components.DailyLoginRewardDialog
@@ -88,6 +92,8 @@ import com.example.ui.components.PieceSlot
 import com.example.ui.components.ScoreHeader
 import com.example.ui.components.SettingsDialog
 import com.example.ui.components.ShapeRenderer
+import com.example.ui.components.ShopDialog
+import com.example.ui.components.ShopTab
 import com.example.ui.components.StatsDialog
 import com.example.ui.components.TutorialOverlay
 import com.example.ui.theme.BoardBackground
@@ -118,9 +124,15 @@ fun GameScreen(
     var showLoginRewardDialog by remember { mutableStateOf(false) }
     var showLeaderboardDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
-    var showFreeHammerAdDialog by remember { mutableStateOf(false) }
+    var showShopDialog by remember { mutableStateOf(false) }
+    var shopInitialTab by remember { mutableStateOf(ShopTab.THEMES) }
+    var freeBoosterPromptType by remember { mutableStateOf<RewardedAdRewardType?>(null) }
     var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.HIGH_SCORES) }
     var isLifecyclePaused by remember { mutableStateOf(false) }
+
+    val activeTheme = remember(gameState.selectedThemeId) {
+        BoardThemeCatalog.byId(gameState.selectedThemeId)
+    }
 
     // Flush active game session, pause Time Attack countdown, and manage music when app backgrounds
     DisposableEffect(lifecycleOwner, viewModel) {
@@ -156,7 +168,8 @@ fun GameScreen(
         showLoginRewardDialog,
         showLeaderboardDialog,
         showSettingsDialog,
-        showFreeHammerAdDialog,
+        showShopDialog,
+        freeBoosterPromptType,
         gameState.isGameOver,
         gameState.gameMode
     ) {
@@ -168,7 +181,8 @@ fun GameScreen(
             showLoginRewardDialog ||
             showLeaderboardDialog ||
             showSettingsDialog ||
-            showFreeHammerAdDialog ||
+            showShopDialog ||
+            freeBoosterPromptType != null ||
             gameState.isGameOver
         viewModel.setTimeAttackPaused(shouldPause)
     }
@@ -184,6 +198,8 @@ fun GameScreen(
                     when (earnedType) {
                         RewardedAdRewardType.SECOND_CHANCE -> viewModel.grantSecondChanceAfterAd()
                         RewardedAdRewardType.FREE_HAMMER -> viewModel.grantFreeHammerAfterAd()
+                        RewardedAdRewardType.FREE_SHUFFLE -> viewModel.grantFreeShuffleAfterAd()
+                        RewardedAdRewardType.FREE_BOMB -> viewModel.grantFreeBombAfterAd()
                     }
                 },
                 onAdClosedOrFailed = { errorMsg ->
@@ -295,7 +311,7 @@ fun GameScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(DarkBackground)
+            .background(activeTheme.screenBackground)
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -303,7 +319,10 @@ fun GameScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .onGloballyPositioned { coordinates ->
-                    containerRootTopLeft = coordinates.boundsInRoot().topLeft
+                    val topLeft = coordinates.boundsInRoot().topLeft
+                    if (containerRootTopLeft != topLeft) {
+                        containerRootTopLeft = topLeft
+                    }
                 }
                 .testTag("game_screen")
         ) {
@@ -363,7 +382,7 @@ fun GameScreen(
                 onToggleHammer = {
                     if (gameState.hammerCount <= 0 && !gameState.isHammerActive) {
                         if (adCoordinator != null) {
-                            showFreeHammerAdDialog = true
+                            freeBoosterPromptType = RewardedAdRewardType.FREE_HAMMER
                         } else {
                             viewModel.toggleHammerMode()
                         }
@@ -374,9 +393,14 @@ fun GameScreen(
                 onUseHint = { viewModel.useHint() },
                 onShowMissions = { showMissionsDrawer = true },
                 onShowDailyRewards = { showLoginRewardDialog = true },
+                onOpenShop = {
+                    shopInitialTab = ShopTab.THEMES
+                    showShopDialog = true
+                },
                 onSwitchMode = { mode -> viewModel.switchGameMode(mode) },
                 onRestart = { viewModel.startNewGame() },
-                compactMode = isCompactHeight
+                compactMode = isCompactHeight,
+                theme = activeTheme
             )
 
             // 2. Center Section: 8x8 Game Board + Live Combo Multiplier HUD Overlay
@@ -390,10 +414,10 @@ fun GameScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = if (isCompactHeight) 2.dp else 4.dp),
+                    .padding(horizontal = 10.dp, vertical = if (isCompactHeight) 2.dp else 4.dp),
                 contentAlignment = Alignment.Center
             ) {
-                val boardSizeDp = minOf(maxWidth, maxHeight).coerceIn(0.dp, 400.dp)
+                val boardSizeDp = minOf(maxWidth, maxHeight).coerceIn(0.dp, 460.dp)
 
                 Box(
                     modifier = Modifier.size(boardSizeDp),
@@ -403,24 +427,27 @@ fun GameScreen(
                         gameState = gameState,
                         ghostColorId = ghostColorId,
                         onCellTapped = { row, col ->
-                            if (gameState.isHammerActive) {
-                                viewModel.useHammerOnCell(row, col)
-                            } else {
-                                val hint = gameState.activeHint
-                                if (hint != null && Pair(row, col) in hint.cells) {
-                                    viewModel.placeShape(hint.pieceIndex, hint.row, hint.col)
-                                } else {
-                                    val selectedIndex = gameState.selectedShapeIndex
-                                    if (selectedIndex != null) {
-                                        viewModel.placeShape(selectedIndex, row, col)
+                            when {
+                                gameState.isBombActive -> viewModel.useBombOnCell(row, col)
+                                gameState.isHammerActive -> viewModel.useHammerOnCell(row, col)
+                                else -> {
+                                    val hint = gameState.activeHint
+                                    if (hint != null && Pair(row, col) in hint.cells) {
+                                        viewModel.placeShape(hint.pieceIndex, hint.row, hint.col)
+                                    } else {
+                                        val selectedIndex = gameState.selectedShapeIndex
+                                        if (selectedIndex != null) {
+                                            viewModel.placeShape(selectedIndex, row, col)
+                                        }
                                     }
                                 }
                             }
                         },
                         onBoardPositioned = { bounds, cellSizePx ->
-                            boardBounds = bounds
-                            boardCellSizePx = cellSizePx
+                            if (boardBounds != bounds) boardBounds = bounds
+                            if (boardCellSizePx != cellSizePx) boardCellSizePx = cellSizePx
                         },
+                        theme = activeTheme,
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -431,11 +458,11 @@ fun GameScreen(
                         prospectiveLinesCount = prospectiveLinesCount,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
-                            .padding(top = 8.dp)
+                            .padding(top = 4.dp)
                     )
                 }
 
-                // Floating instruction pill (does not shrink or jump board)
+                // Floating instruction pill (Hammer / Bomb / Tap to Place)
                 androidx.compose.animation.AnimatedVisibility(
                     visible = gameState.isHammerActive,
                     enter = fadeIn(),
@@ -452,7 +479,7 @@ fun GameScreen(
                             .padding(horizontal = 10.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "🔨 TAP ANY FILLED BLOCK TO SMASH (OR TAP TO CANCEL)",
+                            text = "🔨 TAP ANY FILLED BLOCK TO SMASH (TAP TO CANCEL)",
                             color = Color.Black,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Black
@@ -461,7 +488,32 @@ fun GameScreen(
                 }
 
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = gameState.selectedShapeIndex != null && !gameState.isHammerActive,
+                    visible = gameState.isBombActive,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFFFF5252), Color(0xFFFF6D00))))
+                            .clickable { viewModel.toggleBombMode() }
+                            .padding(horizontal = 10.dp, vertical = 2.dp)
+                            .testTag("bomb_active_instruction_pill")
+                    ) {
+                        Text(
+                            text = "💣 TAP BOARD TO BLAST 3×3 ZONE (TAP TO CANCEL)",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = gameState.selectedShapeIndex != null && !gameState.isHammerActive && !gameState.isBombActive,
                     enter = fadeIn(),
                     exit = fadeOut(),
                     modifier = Modifier
@@ -472,12 +524,12 @@ fun GameScreen(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color(0xEE1E2640))
-                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .border(1.dp, activeTheme.accentColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = "Tap any cell on the grid to place",
-                            color = Color(0xFF00E5FF),
+                            color = activeTheme.accentColor,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -485,7 +537,51 @@ fun GameScreen(
                 }
             }
 
-            // 3. Bottom Section: Active Piece Pool (3 slots)
+            // 3. Dedicated Booster Dock (Hammer, Hint, Shuffle, 3x3 Bomb, Shop)
+            BoosterBar(
+                hammerCount = gameState.hammerCount,
+                isHammerActive = gameState.isHammerActive,
+                hintCount = gameState.hintCount,
+                isHintActive = gameState.activeHint != null,
+                shuffleCount = gameState.shuffleCount,
+                bombCount = gameState.bombCount,
+                isBombActive = gameState.isBombActive,
+                coinsBalance = gameState.coinsBalance,
+                onToggleHammer = {
+                    if (gameState.hammerCount <= 0 && !gameState.isHammerActive) {
+                        if (adCoordinator != null) {
+                            freeBoosterPromptType = RewardedAdRewardType.FREE_HAMMER
+                        } else {
+                            viewModel.toggleHammerMode()
+                        }
+                    } else {
+                        viewModel.toggleHammerMode()
+                    }
+                },
+                onUseHint = { viewModel.useHint() },
+                onShuffle = {
+                    if (gameState.shuffleCount <= 0 && adCoordinator != null) {
+                        freeBoosterPromptType = RewardedAdRewardType.FREE_SHUFFLE
+                    } else {
+                        viewModel.useShuffle()
+                    }
+                },
+                onToggleBomb = {
+                    if (gameState.bombCount <= 0 && !gameState.isBombActive && adCoordinator != null) {
+                        freeBoosterPromptType = RewardedAdRewardType.FREE_BOMB
+                    } else {
+                        viewModel.toggleBombMode()
+                    }
+                },
+                onOpenShop = {
+                    shopInitialTab = ShopTab.THEMES
+                    showShopDialog = true
+                },
+                compactMode = isCompactHeight,
+                theme = activeTheme
+            )
+
+            // 4. Bottom Section: Active Piece Pool (3 slots)
             PieceDeck(
                 pieces = gameState.activePieces,
                 canFitList = canFitList,
@@ -525,33 +621,21 @@ fun GameScreen(
                     }
                     draggingIndex = null
                 },
-                compactMode = isCompactHeight
+                compactMode = isCompactHeight,
+                theme = activeTheme
             )
         }
 
-        // Floating Drag Overlay (renders above entire screen during drag gesture)
+        // Floating Drag Overlay (reads dragTouchPos only in Layout phase for 0-recomposition drag)
         if (draggingShape != null && boardCellSizePx > 0f) {
-            val shape = draggingShape
-            val shapeWidthPx = shape.width * boardCellSizePx
-            val shapeHeightPx = shape.height * boardCellSizePx
-            val localTouchX = dragTouchPos.x - containerRootTopLeft.x
-            val localTouchY = dragTouchPos.y - containerRootTopLeft.y
-            val overlayPieceLeftX = localTouchX - (shapeWidthPx / 2f)
-            val overlayPieceTopY = (localTouchY - liftOffsetPx) - (shapeHeightPx / 2f)
-
-            val cellUnitDp = with(density) { boardCellSizePx.toDp() }
-
-            Box(
-                modifier = Modifier
-                    .offset { IntOffset(overlayPieceLeftX.toInt(), overlayPieceTopY.toInt()) }
-                    .shadow(14.dp)
-                    .testTag("dragging_piece_overlay")
-            ) {
-                ShapeRenderer(
-                    shape = shape,
-                    cellUnitDp = cellUnitDp
-                )
-            }
+            DraggingPieceOverlay(
+                shape = draggingShape,
+                boardCellSizePx = boardCellSizePx,
+                liftOffsetPx = liftOffsetPx,
+                dragTouchPosProvider = { dragTouchPos },
+                containerTopLeftProvider = { containerRootTopLeft },
+                theme = activeTheme
+            )
         }
 
         // Game Over Modal
@@ -700,21 +784,53 @@ fun GameScreen(
             )
         }
 
-        // Out-of-Hammers Rewarded Ad Prompt
-        if (showFreeHammerAdDialog) {
-            FreeHammerAdPromptDialog(
+        // Out-of-Boosters Rewarded Ad Prompt (Hammer, Shuffle, or 3x3 Bomb)
+        freeBoosterPromptType?.let { promptType ->
+            FreeBoosterAdPromptDialog(
+                rewardType = promptType,
                 isRewardedAdReady = adState.isRewardedAdReady,
                 isRewardedAdLoading = adState.isRewardedAdLoading,
                 isAdShowing = adState.isAdShowing,
                 onWatchAd = {
-                    showFreeHammerAdDialog = false
-                    launchRewardedAd(RewardedAdRewardType.FREE_HAMMER)
+                    val requested = promptType
+                    freeBoosterPromptType = null
+                    launchRewardedAd(requested)
                 },
-                onOpenDailyRewards = {
-                    showFreeHammerAdDialog = false
-                    showLoginRewardDialog = true
+                onOpenShopOrRewards = {
+                    freeBoosterPromptType = null
+                    shopInitialTab = ShopTab.BOOSTERS
+                    showShopDialog = true
                 },
-                onDismiss = { showFreeHammerAdDialog = false }
+                onDismiss = { freeBoosterPromptType = null }
+            )
+        }
+
+        // Theme & Booster Coin Shop Dialog
+        if (showShopDialog) {
+            ShopDialog(
+                coinsBalance = gameState.coinsBalance,
+                selectedThemeId = gameState.selectedThemeId,
+                unlockedThemeIds = gameState.unlockedThemeIds,
+                hammerCount = gameState.hammerCount,
+                hintCount = gameState.hintCount,
+                shuffleCount = gameState.shuffleCount,
+                bombCount = gameState.bombCount,
+                isRewardedAdReady = adState.isRewardedAdReady,
+                isRewardedAdLoading = adState.isRewardedAdLoading,
+                isAdShowing = adState.isAdShowing,
+                onSelectOrUnlockTheme = { themeId -> viewModel.selectOrUnlockTheme(themeId) },
+                onBuyBooster = { booster -> viewModel.buyBoosterWithCoins(booster) },
+                onWatchAdForBooster = if (adCoordinator != null) { booster ->
+                    showShopDialog = false
+                    when (booster) {
+                        ShopBoosterType.HAMMER -> launchRewardedAd(RewardedAdRewardType.FREE_HAMMER)
+                        ShopBoosterType.SHUFFLE -> launchRewardedAd(RewardedAdRewardType.FREE_SHUFFLE)
+                        ShopBoosterType.BOMB -> launchRewardedAd(RewardedAdRewardType.FREE_BOMB)
+                        ShopBoosterType.HINT -> Unit
+                    }
+                } else null,
+                onDismiss = { showShopDialog = false },
+                initialTab = shopInitialTab
             )
         }
 
@@ -740,20 +856,45 @@ fun GameScreen(
 }
 
 @Composable
-private fun FreeHammerAdPromptDialog(
+private fun FreeBoosterAdPromptDialog(
+    rewardType: RewardedAdRewardType,
     isRewardedAdReady: Boolean,
     isRewardedAdLoading: Boolean,
     isAdShowing: Boolean,
     onWatchAd: () -> Unit,
-    onOpenDailyRewards: () -> Unit,
+    onOpenShopOrRewards: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val isHammer = rewardType == RewardedAdRewardType.FREE_HAMMER
+    val isShuffle = rewardType == RewardedAdRewardType.FREE_SHUFFLE
+    val emoji = when {
+        isHammer -> "🔨"
+        isShuffle -> "🔄"
+        else -> "💣"
+    }
+    val title = when {
+        isHammer -> "OUT OF HAMMERS!"
+        isShuffle -> "OUT OF SHUFFLES!"
+        else -> "OUT OF BOMBS!"
+    }
+    val body = when {
+        isHammer -> "Watch a short video ad to earn +1 Free Hammer instantly, or craft one with Coins in the Shop."
+        isShuffle -> "Watch a short video ad to earn +1 Free Shuffle instantly, or buy one with Coins in the Shop."
+        else -> "Watch a short video ad to earn +1 Free 3×3 Bomb instantly, or buy one with Coins in the Shop."
+    }
+    val watchCta = when {
+        !isRewardedAdReady && isRewardedAdLoading -> "LOADING AD..."
+        isHammer -> "WATCH AD • +1 HAMMER"
+        isShuffle -> "WATCH AD • +1 SHUFFLE"
+        else -> "WATCH AD • +1 BOMB"
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp)
-                .testTag("free_hammer_ad_dialog"),
+                .testTag(if (isHammer) "free_hammer_ad_dialog" else "free_booster_ad_dialog"),
             shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.cardColors(containerColor = BoardBackground),
             border = BorderStroke(1.5.dp, BoardBorder)
@@ -766,17 +907,17 @@ private fun FreeHammerAdPromptDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "🔨",
+                    text = emoji,
                     fontSize = 36.sp
                 )
                 Text(
-                    text = "OUT OF HAMMERS!",
+                    text = title,
                     style = MaterialTheme.typography.titleLarge,
                     color = Color(0xFFFFD54F),
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "Watch a short video ad to earn +1 Free Hammer instantly, or craft one with Coins in Daily Rewards.",
+                    text = body,
                     fontSize = 12.sp,
                     color = Color(0xFFB4C0D8)
                 )
@@ -787,7 +928,7 @@ private fun FreeHammerAdPromptDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
-                        .testTag("free_hammer_watch_ad_button"),
+                        .testTag(if (isHammer) "free_hammer_watch_ad_button" else "free_booster_watch_ad_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
                 ) {
@@ -802,11 +943,7 @@ private fun FreeHammerAdPromptDialog(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = if (!isRewardedAdReady && isRewardedAdLoading) {
-                                "LOADING AD..."
-                            } else {
-                                "WATCH AD • +1 HAMMER"
-                            },
+                            text = watchCta,
                             color = Color(0xFF0F111E),
                             fontWeight = FontWeight.Black,
                             fontSize = 13.sp
@@ -815,7 +952,7 @@ private fun FreeHammerAdPromptDialog(
                 }
 
                 OutlinedButton(
-                    onClick = onOpenDailyRewards,
+                    onClick = onOpenShopOrRewards,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(44.dp)
@@ -825,7 +962,7 @@ private fun FreeHammerAdPromptDialog(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF))
                 ) {
                     Text(
-                        text = "CRAFT WITH COINS",
+                        text = "OPEN COIN SHOP",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -849,6 +986,46 @@ private fun FreeHammerAdPromptDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DraggingPieceOverlay(
+    shape: BlockShape,
+    boardCellSizePx: Float,
+    liftOffsetPx: Float,
+    dragTouchPosProvider: () -> Offset,
+    containerTopLeftProvider: () -> Offset,
+    theme: BoardThemeSpec
+) {
+    val density = LocalDensity.current
+    val cellUnitDp = remember(boardCellSizePx, density) {
+        with(density) { boardCellSizePx.toDp() }
+    }
+    val halfWidthPx = remember(shape.width, boardCellSizePx) {
+        (shape.width * boardCellSizePx) / 2f
+    }
+    val halfHeightPx = remember(shape.height, boardCellSizePx) {
+        (shape.height * boardCellSizePx) / 2f
+    }
+
+    Box(
+        modifier = Modifier
+            .offset {
+                val touch = dragTouchPosProvider()
+                val containerTopLeft = containerTopLeftProvider()
+                val leftPx = (touch.x - containerTopLeft.x) - halfWidthPx
+                val topPx = (touch.y - containerTopLeft.y - liftOffsetPx) - halfHeightPx
+                IntOffset(leftPx.toInt(), topPx.toInt())
+            }
+            .shadow(14.dp)
+            .testTag("dragging_piece_overlay")
+    ) {
+        ShapeRenderer(
+            shape = shape,
+            cellUnitDp = cellUnitDp,
+            theme = theme
+        )
     }
 }
 

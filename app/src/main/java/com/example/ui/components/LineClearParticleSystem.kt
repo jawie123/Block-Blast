@@ -111,6 +111,7 @@ fun LineClearParticleSystem(
     val beams = remember { mutableListOf<LineClearBeam>() }
     val rings = remember { mutableListOf<ShockwaveRing>() }
     val lastHandledBurstIds = remember { mutableSetOf<Long>() }
+    val reusablePath = remember { Path() }
 
     var hasActiveEffects by remember { mutableStateOf(false) }
     var frameTick by remember { mutableLongStateOf(0L) }
@@ -453,20 +454,19 @@ fun LineClearParticleSystem(
                 ParticleType.GEM_SHARD -> {
                     // Diamond-shaped gemstone fragment rotating
                     rotate(degrees = p.rotation, pivot = center) {
-                        val path = Path().apply {
-                            moveTo(p.x, p.y - p.size * 1.35f)
-                            lineTo(p.x + p.size * 0.9f, p.y)
-                            lineTo(p.x, p.y + p.size * 1.35f)
-                            lineTo(p.x - p.size * 0.9f, p.y)
-                            close()
-                        }
+                        reusablePath.reset()
+                        reusablePath.moveTo(p.x, p.y - p.size * 1.35f)
+                        reusablePath.lineTo(p.x + p.size * 0.9f, p.y)
+                        reusablePath.lineTo(p.x, p.y + p.size * 1.35f)
+                        reusablePath.lineTo(p.x - p.size * 0.9f, p.y)
+                        reusablePath.close()
                         drawPath(
-                            path = path,
+                            path = reusablePath,
                             color = p.color.copy(alpha = p.alpha),
                             style = Fill
                         )
                         drawPath(
-                            path = path,
+                            path = reusablePath,
                             color = Color.White.copy(alpha = p.alpha * 0.8f),
                             style = Stroke(width = 1.2f)
                         )
@@ -476,21 +476,20 @@ fun LineClearParticleSystem(
                 ParticleType.STAR_SPARK -> {
                     // 4-pointed radiant star sparkle
                     rotate(degrees = p.rotation, pivot = center) {
-                        val starPath = Path().apply {
-                            val outer = p.size * 1.5f
-                            val inner = p.size * 0.35f
-                            moveTo(p.x, p.y - outer)
-                            lineTo(p.x + inner, p.y - inner)
-                            lineTo(p.x + outer, p.y)
-                            lineTo(p.x + inner, p.y + inner)
-                            lineTo(p.x, p.y + outer)
-                            lineTo(p.x - inner, p.y + inner)
-                            lineTo(p.x - outer, p.y)
-                            lineTo(p.x - inner, p.y - inner)
-                            close()
-                        }
+                        val outer = p.size * 1.5f
+                        val inner = p.size * 0.35f
+                        reusablePath.reset()
+                        reusablePath.moveTo(p.x, p.y - outer)
+                        reusablePath.lineTo(p.x + inner, p.y - inner)
+                        reusablePath.lineTo(p.x + outer, p.y)
+                        reusablePath.lineTo(p.x + inner, p.y + inner)
+                        reusablePath.lineTo(p.x, p.y + outer)
+                        reusablePath.lineTo(p.x - inner, p.y + inner)
+                        reusablePath.lineTo(p.x - outer, p.y)
+                        reusablePath.lineTo(p.x - inner, p.y - inner)
+                        reusablePath.close()
                         drawPath(
-                            path = starPath,
+                            path = reusablePath,
                             color = p.color.copy(alpha = p.alpha),
                             style = Fill
                         )
@@ -505,21 +504,20 @@ fun LineClearParticleSystem(
                 ParticleType.COMBO_STARBURST -> {
                     // Radiant 6-pointed starburst for combos
                     rotate(degrees = p.rotation, pivot = center) {
-                        val burstPath = Path().apply {
-                            val outer = p.size * 1.8f
-                            val inner = p.size * 0.4f
-                            for (step in 0 until 6) {
-                                val outAngle = step * (PI / 3).toFloat()
-                                val inAngle = outAngle + (PI / 6).toFloat()
-                                val outX = p.x + cos(outAngle) * outer
-                                val outY = p.y + sin(outAngle) * outer
-                                val inX = p.x + cos(inAngle) * inner
-                                val inY = p.y + sin(inAngle) * inner
-                                if (step == 0) moveTo(outX, outY) else lineTo(outX, outY)
-                                lineTo(inX, inY)
-                            }
-                            close()
+                        val outer = p.size * 1.8f
+                        val inner = p.size * 0.4f
+                        reusablePath.reset()
+                        for (step in 0 until 6) {
+                            val outAngle = step * (PI / 3).toFloat()
+                            val inAngle = outAngle + (PI / 6).toFloat()
+                            val outX = p.x + cos(outAngle) * outer
+                            val outY = p.y + sin(outAngle) * outer
+                            val inX = p.x + cos(inAngle) * inner
+                            val inY = p.y + sin(inAngle) * inner
+                            if (step == 0) reusablePath.moveTo(outX, outY) else reusablePath.lineTo(outX, outY)
+                            reusablePath.lineTo(inX, inY)
                         }
+                        reusablePath.close()
                         // Outer glowing halo
                         drawCircle(
                             color = p.color.copy(alpha = p.alpha * 0.35f),
@@ -527,7 +525,7 @@ fun LineClearParticleSystem(
                             center = center
                         )
                         drawPath(
-                            path = burstPath,
+                            path = reusablePath,
                             color = p.color.copy(alpha = p.alpha),
                             style = Fill
                         )

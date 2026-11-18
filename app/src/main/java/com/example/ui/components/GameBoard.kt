@@ -4,6 +4,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,13 +18,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -49,6 +53,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import com.example.model.BoardThemeCatalog
+import com.example.model.BoardThemeSpec
 import com.example.model.GameState
 import com.example.model.ScorePopup
 import com.example.ui.theme.BoardBackground
@@ -63,44 +69,50 @@ fun GridBoard(
     ghostColorId: Int?,
     onCellTapped: (row: Int, col: Int) -> Unit,
     onBoardPositioned: (bounds: Rect, cellSizePx: Float) -> Unit,
+    theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
 
     val streak = gameState.comboStreak
     val isHighScoreStreak = gameState.isNewHighScore || streak >= 4
+    val isBombMode = gameState.isBombActive
 
-    // Dynamic background colors responding smoothly to combo streaks, multipliers, and high-scores
+    // Dynamic background colors responding smoothly to combo streaks, multipliers, and themes
     val targetBgTop = when {
+        isBombMode -> Color(0xFF281210)
         isHighScoreStreak -> Color(0xFF26190B) // Radiant Gold-Amber aura
         streak >= 3 -> Color(0xFF2A1028) // Fiery Crimson / Magenta aura
         streak == 2 -> Color(0xFF1B1438) // Electric Purple aura
         streak == 1 -> Color(0xFF101E33) // Electric Cyan aura
-        else -> Color(0xFF16192B) // Default midnight blue
+        else -> theme.boardBackground
     }
 
     val targetBgBottom = when {
+        isBombMode -> Color(0xFF170B0A)
         isHighScoreStreak -> Color(0xFF181005)
         streak >= 3 -> Color(0xFF1A0A19)
         streak == 2 -> Color(0xFF110D24)
         streak == 1 -> Color(0xFF0C1422)
-        else -> Color(0xFF101220)
+        else -> theme.boardBackground.copy(alpha = 0.94f)
     }
 
     val targetBorderColor = when {
+        isBombMode -> Color(0xFFFF5722)
         isHighScoreStreak -> Color(0xFFFFD700) // Golden crown border
         streak >= 3 -> Color(0xFFFF007A) // Hot Pink / Neon Crimson
         streak == 2 -> Color(0xFF9C27B0) // Vivid Purple
         streak == 1 -> Color(0xFF00E5FF) // Electric Cyan
-        else -> BoardBorder // Default
+        else -> theme.boardBorder
     }
 
     val targetGlowColor = when {
+        isBombMode -> Color(0xFFFF5722)
         isHighScoreStreak -> Color(0xFFFFB300)
         streak >= 3 -> Color(0xFFFF1744)
         streak == 2 -> Color(0xFF7C4DFF)
         streak == 1 -> Color(0xFF00E5FF)
-        else -> Color(0xFF00E5FF).copy(alpha = 0.25f)
+        else -> theme.accentColor.copy(alpha = 0.25f)
     }
 
     // Smooth animated color transitions
@@ -152,12 +164,12 @@ fun GridBoard(
                     val cellSizePx = bounds.width / 8f
                     onBoardPositioned(bounds, cellSizePx)
                 }
-                .pointerInput(gameState.selectedShapeIndex, gameState.isHammerActive) {
+                .pointerInput(gameState.selectedShapeIndex, gameState.isHammerActive, gameState.isBombActive) {
                     detectTapGestures { offset ->
                         val cellSize = size.width / 8f
                         val col = (offset.x / cellSize).toInt().coerceIn(0, 7)
                         val row = (offset.y / cellSize).toInt().coerceIn(0, 7)
-                        if (gameState.selectedShapeIndex != null || gameState.isHammerActive) {
+                        if (gameState.selectedShapeIndex != null || gameState.isHammerActive || gameState.isBombActive) {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
                         onCellTapped(row, col)
@@ -182,39 +194,98 @@ fun GridBoard(
                 )
             }
 
-            // 8x8 Grid Matrix implemented using LazyVerticalGrid
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(8),
+            val hoverMask = remember(gameState.hoverPreviewCells) {
+                var mask = 0L
+                for (cell in gameState.hoverPreviewCells) {
+                    val r = cell.first
+                    val c = cell.second
+                    if (r in 0..7 && c in 0..7) {
+                        mask = mask or (1L shl (r * 8 + c))
+                    }
+                }
+                mask
+            }
+            val clearingMask = remember(gameState.clearingCells) {
+                var mask = 0L
+                for (cell in gameState.clearingCells) {
+                    val r = cell.first
+                    val c = cell.second
+                    if (r in 0..7 && c in 0..7) {
+                        mask = mask or (1L shl (r * 8 + c))
+                    }
+                }
+                mask
+            }
+
+            // Single shared pulse animation, instantiated only while a cell actually pulses
+            val needsTargetPulse = gameState.isHammerActive || gameState.isBombActive
+            val needsProspectivePulse = gameState.prospectiveRows.isNotEmpty() || gameState.prospectiveCols.isNotEmpty()
+            val sharedPulseAlpha: Float? = if (needsTargetPulse || needsProspectivePulse) {
+                val pulseTransition = rememberInfiniteTransition(label = "board_cell_pulse")
+                val pulse by pulseTransition.animateFloat(
+                    initialValue = if (needsTargetPulse) 0.5f else 0.35f,
+                    targetValue = if (needsTargetPulse) 1.0f else 0.85f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(if (needsTargetPulse) 350 else 450, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "board_cell_pulse_alpha"
+                )
+                pulse
+            } else {
+                null
+            }
+
+            val stableEmptyTint = if (streak > 0 || isHighScoreStreak) targetGlowColor else null
+
+            // 8x8 Grid Matrix rendered directly with Column/Row (avoids LazyVerticalGrid subcomposition overhead)
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .testTag("grid_board_lazy_grid"),
-                userScrollEnabled = false
+                    .testTag("grid_board_lazy_grid")
             ) {
-                items(count = 64) { index ->
-                    val r = index / 8
-                    val c = index % 8
-                    val colorId = gameState.grid[r][c]
-                    val isGhost = gameState.hoverPreviewCells.contains(Pair(r, c))
-                    val isClearing = gameState.clearingCells.contains(Pair(r, c))
-                    val isProspective = gameState.prospectiveRows.contains(r) ||
-                            gameState.prospectiveCols.contains(c)
-
-                    val isHammerTarget = gameState.isHammerActive && colorId > 0
-
-                    Box(
+                for (r in 0 until 8) {
+                    val rowGrid = gameState.grid[r]
+                    val isRowProspective = gameState.prospectiveRows.contains(r)
+                    Row(
                         modifier = Modifier
-                            .aspectRatio(1f)
-                            .testTag("grid_cell_${r}_${c}")
+                            .fillMaxWidth()
+                            .weight(1f)
                     ) {
-                        BlockCell(
-                            colorId = colorId,
-                            isGhostPreview = isGhost,
-                            ghostColorId = ghostColorId,
-                            isClearing = isClearing,
-                            isProspectiveClear = isProspective,
-                            isHammerTarget = isHammerTarget,
-                            emptyTileTint = if (streak > 0 || isHighScoreStreak) animGlowColor else null
-                        )
+                        for (c in 0 until 8) {
+                            val bit = 1L shl (r * 8 + c)
+                            val colorId = rowGrid[c]
+                            val isGhost = (hoverMask and bit) != 0L
+                            val isClearing = (clearingMask and bit) != 0L
+                            val isProspective = isRowProspective || gameState.prospectiveCols.contains(c)
+                            val isHammerTarget = gameState.isHammerActive && colorId > 0
+                            val isBombTarget = gameState.isBombActive && colorId > 0
+                            val cellPulse = if (isProspective || isHammerTarget || isBombTarget) {
+                                sharedPulseAlpha
+                            } else {
+                                null
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .testTag("grid_cell_${r}_${c}")
+                            ) {
+                                BlockCell(
+                                    colorId = colorId,
+                                    isGhostPreview = isGhost,
+                                    ghostColorId = ghostColorId,
+                                    isClearing = isClearing,
+                                    isProspectiveClear = isProspective,
+                                    isHammerTarget = isHammerTarget,
+                                    isBombTarget = isBombTarget,
+                                    theme = theme,
+                                    emptyTileTint = stableEmptyTint,
+                                    pulseAlpha = cellPulse
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -282,6 +353,7 @@ fun GameBoard(
     ghostColorId: Int?,
     onCellTapped: (row: Int, col: Int) -> Unit,
     onBoardPositioned: (bounds: Rect, cellSizePx: Float) -> Unit,
+    theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
 ) {
     GridBoard(
@@ -289,6 +361,7 @@ fun GameBoard(
         ghostColorId = ghostColorId,
         onCellTapped = onCellTapped,
         onBoardPositioned = onBoardPositioned,
+        theme = theme,
         modifier = modifier
     )
 }

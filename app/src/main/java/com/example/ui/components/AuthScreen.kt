@@ -3,6 +3,7 @@ package com.example.ui.components
 import android.app.Activity
 import android.content.Context
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -215,23 +215,11 @@ fun AuthScreen(
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
-    var isCheckingAutoSignIn by remember { mutableStateOf(true) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        attemptAutoSignIn(
-            context = context,
-            credentialManager = credentialManager,
-            onAuthSuccess = {
-                isCheckingAutoSignIn = false
-                onAuthSuccess()
-            },
-            onUnauthenticated = {
-                isCheckingAutoSignIn = false
-            },
-            scope = coroutineScope
-        )
+    BackHandler(enabled = !isLoading) {
+        onContinueAsGuest()
     }
 
     Box(
@@ -365,7 +353,7 @@ fun AuthScreen(
                         }
                     )
                 },
-                enabled = !isLoading && !isCheckingAutoSignIn,
+                enabled = !isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp)
@@ -378,7 +366,7 @@ fun AuthScreen(
                     disabledContentColor = Color.White
                 )
             ) {
-                if (isLoading || isCheckingAutoSignIn) {
+                if (isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(22.dp),
                         color = Color(0xFF00E5FF),

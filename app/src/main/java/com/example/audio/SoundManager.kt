@@ -10,6 +10,9 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
@@ -23,9 +26,13 @@ import kotlin.math.sin
  * SoundManager using Android's SoundPool for crisp, zero-latency arcade sound effects
  * and MediaPlayer for a looping ambient puzzle background music track.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SoundManager(private val context: Context) {
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private val musicLock = Any()
+
+    @Volatile
+    private var isReleased: Boolean = false
 
     @Volatile
     var isMusicEnabled: Boolean = true
@@ -81,85 +88,106 @@ class SoundManager(private val context: Context) {
         }
     }
 
+    private fun ensureWavFile(
+        filename: String,
+        sampleRate: Int,
+        samplesProvider: () -> ShortArray
+    ): File {
+        val file = File(context.cacheDir, filename)
+        if (file.exists() && file.length() > 44L) {
+            return file
+        }
+        return writeWavFile(filename, samplesProvider(), sampleRate)
+    }
+
     private fun initSounds() {
+        if (isReleased) return
         try {
             val sampleRate = 22050
 
             // 1. Placement Sound: punchy arcade pop (260Hz down to 120Hz)
-            val placeSamples = generateToneSamples(
-                frequencies = doubleArrayOf(260.0, 180.0, 120.0),
-                durationsMs = doubleArrayOf(20.0, 25.0, 30.0),
-                sampleRate = sampleRate,
-                decay = true
-            )
-            val placeFile = writeWavFile("snd_place.wav", placeSamples, sampleRate)
+            val placeFile = ensureWavFile("snd_place.wav", sampleRate) {
+                generateToneSamples(
+                    frequencies = doubleArrayOf(260.0, 180.0, 120.0),
+                    durationsMs = doubleArrayOf(20.0, 25.0, 30.0),
+                    sampleRate = sampleRate,
+                    decay = true
+                )
+            }
             soundPlaceId = soundPool.load(placeFile.absolutePath, 1)
 
             // 2. Pickup Sound: gentle bright chirp (520Hz to 660Hz)
-            val pickupSamples = generateToneSamples(
-                frequencies = doubleArrayOf(520.0, 660.0),
-                durationsMs = doubleArrayOf(20.0, 25.0),
-                sampleRate = sampleRate,
-                decay = true
-            )
-            val pickupFile = writeWavFile("snd_pickup.wav", pickupSamples, sampleRate)
+            val pickupFile = ensureWavFile("snd_pickup.wav", sampleRate) {
+                generateToneSamples(
+                    frequencies = doubleArrayOf(520.0, 660.0),
+                    durationsMs = doubleArrayOf(20.0, 25.0),
+                    sampleRate = sampleRate,
+                    decay = true
+                )
+            }
             soundPickupId = soundPool.load(pickupFile.absolutePath, 1)
 
             // 3. Line Clear Sound: ascending chord chime (C5, E5, G5, C6)
-            val clearSamples = generateToneSamples(
-                frequencies = doubleArrayOf(523.25, 659.25, 783.99, 1046.50),
-                durationsMs = doubleArrayOf(60.0, 60.0, 70.0, 120.0),
-                sampleRate = sampleRate,
-                decay = true
-            )
-            val clearFile = writeWavFile("snd_clear.wav", clearSamples, sampleRate)
+            val clearFile = ensureWavFile("snd_clear.wav", sampleRate) {
+                generateToneSamples(
+                    frequencies = doubleArrayOf(523.25, 659.25, 783.99, 1046.50),
+                    durationsMs = doubleArrayOf(60.0, 60.0, 70.0, 120.0),
+                    sampleRate = sampleRate,
+                    decay = true
+                )
+            }
             soundLineClearId = soundPool.load(clearFile.absolutePath, 1)
 
             // 4. Combo Cheer: sparkling high-energy fanfare chord
-            val comboSamples = generateToneSamples(
-                frequencies = doubleArrayOf(523.25, 659.25, 783.99, 1046.50, 1318.51),
-                durationsMs = doubleArrayOf(50.0, 50.0, 60.0, 80.0, 180.0),
-                sampleRate = sampleRate,
-                decay = true
-            )
-            val comboFile = writeWavFile("snd_combo.wav", comboSamples, sampleRate)
+            val comboFile = ensureWavFile("snd_combo.wav", sampleRate) {
+                generateToneSamples(
+                    frequencies = doubleArrayOf(523.25, 659.25, 783.99, 1046.50, 1318.51),
+                    durationsMs = doubleArrayOf(50.0, 50.0, 60.0, 80.0, 180.0),
+                    sampleRate = sampleRate,
+                    decay = true
+                )
+            }
             soundComboId = soundPool.load(comboFile.absolutePath, 1)
 
             // 5. Game Over: sad descending slide (440Hz down to 146Hz)
-            val overSamples = generateToneSamples(
-                frequencies = doubleArrayOf(440.0, 370.0, 293.66, 220.0, 146.83),
-                durationsMs = doubleArrayOf(90.0, 90.0, 110.0, 130.0, 220.0),
-                sampleRate = sampleRate,
-                decay = true
-            )
-            val overFile = writeWavFile("snd_gameover.wav", overSamples, sampleRate)
+            val overFile = ensureWavFile("snd_gameover.wav", sampleRate) {
+                generateToneSamples(
+                    frequencies = doubleArrayOf(440.0, 370.0, 293.66, 220.0, 146.83),
+                    durationsMs = doubleArrayOf(90.0, 90.0, 110.0, 130.0, 220.0),
+                    sampleRate = sampleRate,
+                    decay = true
+                )
+            }
             soundGameOverId = soundPool.load(overFile.absolutePath, 1)
 
             // 6. PowerUp / Second Chance: ascending sci-fi whoosh
-            val powerSamples = generateToneSamples(
-                frequencies = doubleArrayOf(220.0, 293.66, 370.0, 440.0, 587.33, 740.0, 880.0, 1174.66),
-                durationsMs = doubleArrayOf(30.0, 30.0, 30.0, 35.0, 35.0, 40.0, 50.0, 150.0),
-                sampleRate = sampleRate,
-                decay = false
-            )
-            val powerFile = writeWavFile("snd_powerup.wav", powerSamples, sampleRate)
+            val powerFile = ensureWavFile("snd_powerup.wav", sampleRate) {
+                generateToneSamples(
+                    frequencies = doubleArrayOf(220.0, 293.66, 370.0, 440.0, 587.33, 740.0, 880.0, 1174.66),
+                    durationsMs = doubleArrayOf(30.0, 30.0, 30.0, 35.0, 35.0, 40.0, 50.0, 150.0),
+                    sampleRate = sampleRate,
+                    decay = false
+                )
+            }
             soundPowerupId = soundPool.load(powerFile.absolutePath, 1)
 
             // 7. Hammer Smash Sound: heavy arcade strike & crystal shatter
-            val hammerSamples = generateToneSamples(
-                frequencies = doubleArrayOf(180.0, 90.0, 600.0, 1100.0, 1600.0),
-                durationsMs = doubleArrayOf(35.0, 50.0, 30.0, 40.0, 90.0),
-                sampleRate = sampleRate,
-                decay = true
-            )
-            val hammerFile = writeWavFile("snd_hammer.wav", hammerSamples, sampleRate)
+            val hammerFile = ensureWavFile("snd_hammer.wav", sampleRate) {
+                generateToneSamples(
+                    frequencies = doubleArrayOf(180.0, 90.0, 600.0, 1100.0, 1600.0),
+                    durationsMs = doubleArrayOf(35.0, 50.0, 30.0, 40.0, 90.0),
+                    sampleRate = sampleRate,
+                    decay = true
+                )
+            }
             soundHammerId = soundPool.load(hammerFile.absolutePath, 1)
 
             // 8. Ambient Looping Background Music (16s seamless chill synth pad + chimes)
-            val bgmSamples = generateAmbientMusicSamples(sampleRate = sampleRate)
-            val bgmFile = writeWavFile("bgm_ambient.wav", bgmSamples, sampleRate)
+            val bgmFile = ensureWavFile("bgm_ambient.wav", sampleRate) {
+                generateAmbientMusicSamples(sampleRate = sampleRate)
+            }
             musicFilePath = bgmFile.absolutePath
-            updateMusicPlaybackState()
+            syncMusicPlaybackInternal()
         } catch (_: Exception) {}
     }
 
@@ -169,7 +197,16 @@ class SoundManager(private val context: Context) {
     }
 
     private fun updateMusicPlaybackState() {
+        if (isReleased) return
+        scope.launch {
+            syncMusicPlaybackInternal()
+        }
+    }
+
+    private fun syncMusicPlaybackInternal() {
+        if (isReleased) return
         synchronized(musicLock) {
+            if (isReleased) return
             val shouldPlay = isMusicEnabled && isMusicForegrounded
             try {
                 if (shouldPlay) {
@@ -415,6 +452,7 @@ class SoundManager(private val context: Context) {
     }
 
     fun release() {
+        isReleased = true
         synchronized(musicLock) {
             try {
                 mediaPlayer?.stop()
@@ -427,5 +465,6 @@ class SoundManager(private val context: Context) {
         try {
             soundPool.release()
         } catch (_: Exception) {}
+        scope.cancel()
     }
 }

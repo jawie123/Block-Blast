@@ -84,11 +84,7 @@ private fun AppContent(
 ) {
     val firebaseAuth = remember { runCatching { Firebase.auth }.getOrNull() }
     var currentUser by remember { mutableStateOf(firebaseAuth?.currentUser) }
-    var isGuestMode by remember {
-        mutableStateOf(
-            firebaseAuth == null || (preferences.isGuestSession && firebaseAuth.currentUser == null)
-        )
-    }
+    var showAuthScreen by remember { mutableStateOf(false) }
 
     DisposableEffect(firebaseAuth) {
         if (firebaseAuth == null) {
@@ -99,7 +95,7 @@ private fun AppContent(
             currentUser = signedInUser
             if (signedInUser != null) {
                 preferences.isGuestSession = false
-                isGuestMode = false
+                showAuthScreen = false
             }
         }
         firebaseAuth.addAuthStateListener(listener)
@@ -109,17 +105,17 @@ private fun AppContent(
     }
 
     val user = currentUser
-    if (user == null && !isGuestMode) {
-        // Gate all Firestore queries & cloud sync until Google Sign-In completes, or enter offline Guest mode
+    if (showAuthScreen && user == null) {
+        // Optional Google Sign-In screen opened only when user taps Sign In
         AuthScreen(
             onAuthSuccess = {
                 preferences.isGuestSession = false
-                isGuestMode = false
+                showAuthScreen = false
                 currentUser = firebaseAuth?.currentUser
             },
             onContinueAsGuest = {
                 preferences.isGuestSession = true
-                isGuestMode = true
+                showAuthScreen = false
             }
         )
     } else {
@@ -161,12 +157,14 @@ private fun AppContent(
                 onSignOut = {
                     gameViewModel.flushSession(syncToCloud = !isGuestSession)
                     if (isGuestSession) {
-                        preferences.isGuestSession = false
-                        isGuestMode = false
+                        showAuthScreen = true
                     } else {
                         signOut(
                             credentialManager = credentialManager,
-                            scope = coroutineScope
+                            scope = coroutineScope,
+                            onSignOutComplete = {
+                                preferences.isGuestSession = true
+                            }
                         )
                     }
                 }

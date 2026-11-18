@@ -13,6 +13,8 @@ import com.example.data.LocalSessionStorage
 import com.example.model.Achievement
 import com.example.model.AchievementCatalog
 import com.example.model.BlockShape
+import com.example.model.BoardThemeCatalog
+import com.example.model.BoardThemeId
 import com.example.model.DailyLoginRewardProfile
 import com.example.model.DailyLoginRewardSchedule
 import com.example.model.DailyLoginRewardTier
@@ -29,6 +31,7 @@ import com.example.model.PlacementHint
 import com.example.model.SavedGameSessionData
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
+import com.example.model.ShopBoosterType
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -70,6 +73,10 @@ class GameViewModel(
         GameState(
             totalAllTimeScore = preferences.totalAllTimeScore,
             playerOverallBestScore = computeLocalOverallBestScore(),
+            shuffleCount = preferences.shuffleCount,
+            bombCount = preferences.bombCount,
+            selectedThemeId = preferences.selectedThemeId,
+            unlockedThemeIds = preferences.getUnlockedThemeIds(),
             isMusicEnabled = preferences.isMusicEnabled,
             isSoundEnabled = preferences.isSoundEnabled,
             isHapticsEnabled = preferences.isHapticsEnabled,
@@ -160,6 +167,7 @@ class GameViewModel(
                     playerOverallBestScore = maxOf(it.playerOverallBestScore, bestScore),
                     isNewHighScore = it.isNewHighScore || isNewRecord,
                     isHammerActive = false,
+                    isBombActive = false,
                     selectedShapeIndex = null,
                     hoverRow = null,
                     hoverCol = null,
@@ -333,6 +341,11 @@ class GameViewModel(
             isHammerActive = false,
             hintCount = preferences.hintCount,
             activeHint = null,
+            shuffleCount = preferences.shuffleCount,
+            bombCount = preferences.bombCount,
+            isBombActive = false,
+            selectedThemeId = preferences.selectedThemeId,
+            unlockedThemeIds = preferences.getUnlockedThemeIds(),
             dailyMissions = dailyMissions,
             unclaimedMissionsCount = unclaimedCount,
             difficultyLevel = resumedTier.level,
@@ -580,7 +593,7 @@ class GameViewModel(
             timeRemainingMs = state.timeRemainingMs,
             clientUpdatedAt = now
         )
-        localSessionStorage?.saveSession(session)
+        localSessionStorage?.saveSessionBackground(session)
 
         if (syncToCloud &&
             state.gameMode != GameMode.TIME_ATTACK &&
@@ -617,6 +630,8 @@ class GameViewModel(
         val isNewHighScore: Boolean,
         val dailyBatchIndex: Int,
         val hammerCount: Int = 3,
+        val shuffleCount: Int = 2,
+        val bombCount: Int = 1,
         val timeRemainingMs: Long = TIME_ATTACK_INITIAL_MS,
         val gameOverReason: GameOverReason = GameOverReason.NO_MOVES
     )
@@ -734,6 +749,11 @@ class GameViewModel(
             isHammerActive = false,
             hintCount = preferences.hintCount,
             activeHint = null,
+            shuffleCount = preferences.shuffleCount,
+            bombCount = preferences.bombCount,
+            isBombActive = false,
+            selectedThemeId = preferences.selectedThemeId,
+            unlockedThemeIds = preferences.getUnlockedThemeIds(),
             dailyMissions = dailyMissions,
             unclaimedMissionsCount = unclaimedCount,
             difficultyLevel = DifficultyTier.STARTER.level,
@@ -841,6 +861,8 @@ class GameViewModel(
         hasUserInteractedThisSession = true
 
         preferences.hammerCount = snapshot.hammerCount
+        preferences.shuffleCount = snapshot.shuffleCount
+        preferences.bombCount = snapshot.bombCount
 
         val revertedTier = DifficultyTier.fromScore(snapshot.score)
         val revertedProgress = DifficultyTier.progressToNextTier(snapshot.score)
@@ -861,9 +883,12 @@ class GameViewModel(
                 isNewHighScore = snapshot.isNewHighScore,
                 dailyBatchIndex = snapshot.dailyBatchIndex,
                 hammerCount = snapshot.hammerCount,
+                shuffleCount = snapshot.shuffleCount,
+                bombCount = snapshot.bombCount,
                 timeRemainingMs = snapshot.timeRemainingMs,
                 lastTimeBonusSeconds = 0,
                 isHammerActive = false,
+                isBombActive = false,
                 activeHint = null,
                 selectedShapeIndex = null,
                 hoverRow = null,
@@ -939,6 +964,8 @@ class GameViewModel(
         _gameState.update {
             it.copy(
                 selectedShapeIndex = index,
+                isBombActive = if (index != null) false else it.isBombActive,
+                isHammerActive = if (index != null) false else it.isHammerActive,
                 activeHint = null,
                 hoverRow = null,
                 hoverCol = null,
@@ -1051,6 +1078,9 @@ class GameViewModel(
         val shape = state.activePieces.getOrNull(shapeIndex) ?: return
 
         if (targetRow == null || targetCol == null) {
+            if (state.hoverRow == null && state.hoverCol == null && state.hoverPreviewCells.isEmpty()) {
+                return
+            }
             _gameState.update {
                 it.copy(
                     hoverRow = null,
@@ -1063,29 +1093,47 @@ class GameViewModel(
             return
         }
 
+        // Fast-path: pointer moved within the same board cell
+        if (state.hoverRow == targetRow && state.hoverCol == targetCol && state.activeHint == null) {
+            return
+        }
+
         if (canPlaceShape(state.grid, shape, targetRow, targetCol)) {
-            val previewCells = mutableSetOf<Pair<Int, Int>>()
+            val previewCells = HashSet<Pair<Int, Int>>(shape.cellCount)
+            var previewMask = 0L
             for (r in 0 until shape.height) {
                 for (c in 0 until shape.width) {
                     if (shape.matrix[r][c]) {
-                        previewCells.add(Pair(targetRow + r, targetCol + c))
+                        val rr = targetRow + r
+                        val cc = targetCol + c
+                        previewCells.add(Pair(rr, cc))
+                        previewMask = previewMask or (1L shl (rr * 8 + cc))
                     }
                 }
             }
 
-            val prospectiveRows = mutableSetOf<Int>()
-            val prospectiveCols = mutableSetOf<Int>()
+            val prospectiveRows = HashSet<Int>(4)
+            val prospectiveCols = HashSet<Int>(4)
 
             for (r in 0 until 8) {
-                val full = (0 until 8).all { c ->
-                    state.grid[r][c] != 0 || previewCells.contains(Pair(r, c))
+                val rowGrid = state.grid[r]
+                var full = true
+                for (c in 0 until 8) {
+                    if (rowGrid[c] == 0 && (previewMask and (1L shl (r * 8 + c))) == 0L) {
+                        full = false
+                        break
+                    }
                 }
                 if (full) prospectiveRows.add(r)
             }
 
             for (c in 0 until 8) {
-                val full = (0 until 8).all { r ->
-                    state.grid[r][c] != 0 || previewCells.contains(Pair(r, c))
+                var full = true
+                for (r in 0 until 8) {
+                    if (state.grid[r][c] == 0 && (previewMask and (1L shl (r * 8 + c))) == 0L) {
+                        full = false
+                        break
+                    }
                 }
                 if (full) prospectiveCols.add(c)
             }
@@ -1101,6 +1149,13 @@ class GameViewModel(
                 )
             }
         } else {
+            if (state.hoverRow == targetRow &&
+                state.hoverCol == targetCol &&
+                state.hoverPreviewCells.isEmpty() &&
+                state.activeHint == null
+            ) {
+                return
+            }
             _gameState.update {
                 it.copy(
                     hoverRow = targetRow,
@@ -1135,6 +1190,8 @@ class GameViewModel(
             isNewHighScore = currentState.isNewHighScore,
             dailyBatchIndex = currentState.dailyBatchIndex,
             hammerCount = currentState.hammerCount,
+            shuffleCount = currentState.shuffleCount,
+            bombCount = currentState.bombCount,
             timeRemainingMs = currentState.timeRemainingMs,
             gameOverReason = currentState.gameOverReason
         )
@@ -1395,6 +1452,8 @@ class GameViewModel(
                 gameOverReason = if (isGameOver) GameOverReason.NO_MOVES else it.gameOverReason,
                 isNewHighScore = isNewRecord,
                 selectedShapeIndex = null,
+                isHammerActive = false,
+                isBombActive = false,
                 activeHint = null,
                 hoverRow = null,
                 hoverCol = null,
@@ -1597,6 +1656,7 @@ class GameViewModel(
         _gameState.update {
             it.copy(
                 isHammerActive = willBeActive,
+                isBombActive = if (willBeActive) false else it.isBombActive,
                 selectedShapeIndex = if (willBeActive) null else it.selectedShapeIndex,
                 activeHint = if (willBeActive) null else it.activeHint,
                 hoverPreviewCells = if (willBeActive) emptySet() else it.hoverPreviewCells,
@@ -1682,6 +1742,7 @@ class GameViewModel(
                 hintCount = newHintCount,
                 activeHint = bestHint,
                 isHammerActive = false,
+                isBombActive = false,
                 selectedShapeIndex = bestHint.pieceIndex,
                 hoverRow = bestHint.row,
                 hoverCol = bestHint.col,
@@ -1705,7 +1766,11 @@ class GameViewModel(
         grid: List<List<Int>>,
         activePieces: List<BlockShape?>
     ): PlacementHint? {
-        var bestHint: PlacementHint? = null
+        var bestPieceIdx = -1
+        var bestRow = 0
+        var bestCol = 0
+        var bestShape: BlockShape? = null
+        var bestCleared = 0
         var bestScore = Int.MIN_VALUE
 
         for ((pieceIdx, shape) in activePieces.withIndex()) {
@@ -1714,58 +1779,77 @@ class GameViewModel(
                 for (startC in 0..(8 - shape.width)) {
                     if (!canPlaceShape(grid, shape, startR, startC)) continue
 
-                    val placedCells = HashSet<Pair<Int, Int>>(shape.cellCount)
+                    var placedMask = 0L
                     var neighborScore = 0
                     for (dr in 0 until shape.height) {
                         for (dc in 0 until shape.width) {
                             if (shape.matrix[dr][dc]) {
                                 val rr = startR + dr
                                 val cc = startC + dc
-                                placedCells.add(Pair(rr, cc))
+                                placedMask = placedMask or (1L shl (rr * 8 + cc))
+                                if (rr == 0 || grid[rr - 1][cc] != 0) neighborScore += 25
+                                if (rr == 7 || grid[rr + 1][cc] != 0) neighborScore += 25
+                                if (cc == 0 || grid[rr][cc - 1] != 0) neighborScore += 25
+                                if (cc == 7 || grid[rr][cc + 1] != 0) neighborScore += 25
                             }
                         }
                     }
 
                     var fullRows = 0
                     for (r in 0 until 8) {
-                        if ((0 until 8).all { c -> grid[r][c] != 0 || Pair(r, c) in placedCells }) {
-                            fullRows++
-                        }
-                    }
-                    var fullCols = 0
-                    for (c in 0 until 8) {
-                        if ((0 until 8).all { r -> grid[r][c] != 0 || Pair(r, c) in placedCells }) {
-                            fullCols++
-                        }
-                    }
-                    val totalCleared = fullRows + fullCols
-
-                    for ((rr, cc) in placedCells) {
-                        val dirs = arrayOf(-1 to 0, 1 to 0, 0 to -1, 0 to 1)
-                        for ((dr, dc) in dirs) {
-                            val nr = rr + dr
-                            val nc = cc + dc
-                            if (nr !in 0 until 8 || nc !in 0 until 8 || grid[nr][nc] != 0) {
-                                neighborScore += 25
+                        val rowGrid = grid[r]
+                        var full = true
+                        for (c in 0 until 8) {
+                            if (rowGrid[c] == 0 && (placedMask and (1L shl (r * 8 + c))) == 0L) {
+                                full = false
+                                break
                             }
                         }
+                        if (full) fullRows++
                     }
 
+                    var fullCols = 0
+                    for (c in 0 until 8) {
+                        var full = true
+                        for (r in 0 until 8) {
+                            if (grid[r][c] == 0 && (placedMask and (1L shl (r * 8 + c))) == 0L) {
+                                full = false
+                                break
+                            }
+                        }
+                        if (full) fullCols++
+                    }
+
+                    val totalCleared = fullRows + fullCols
                     val candidateScore = (totalCleared * 10_000) + neighborScore + (shape.cellCount * 10)
                     if (candidateScore > bestScore) {
                         bestScore = candidateScore
-                        bestHint = PlacementHint(
-                            pieceIndex = pieceIdx,
-                            row = startR,
-                            col = startC,
-                            cells = placedCells,
-                            clearedLines = totalCleared
-                        )
+                        bestPieceIdx = pieceIdx
+                        bestRow = startR
+                        bestCol = startC
+                        bestShape = shape
+                        bestCleared = totalCleared
                     }
                 }
             }
         }
-        return bestHint
+
+        val winningShape = bestShape ?: return null
+        val placedCells = HashSet<Pair<Int, Int>>(winningShape.cellCount)
+        for (dr in 0 until winningShape.height) {
+            for (dc in 0 until winningShape.width) {
+                if (winningShape.matrix[dr][dc]) {
+                    placedCells.add(Pair(bestRow + dr, bestCol + dc))
+                }
+            }
+        }
+        return PlacementHint(
+            pieceIndex = bestPieceIdx,
+            row = bestRow,
+            col = bestCol,
+            cells = placedCells,
+            clearedLines = bestCleared
+        )
     }
 
     fun activateHammerFromGameOver() {
@@ -1803,6 +1887,8 @@ class GameViewModel(
             isNewHighScore = currentState.isNewHighScore,
             dailyBatchIndex = currentState.dailyBatchIndex,
             hammerCount = currentState.hammerCount,
+            shuffleCount = currentState.shuffleCount,
+            bombCount = currentState.bombCount,
             timeRemainingMs = currentState.timeRemainingMs,
             gameOverReason = currentState.gameOverReason
         )
@@ -1833,6 +1919,7 @@ class GameViewModel(
                 grid = frozenGrid,
                 hammerCount = newHammerCount,
                 isHammerActive = false,
+                isBombActive = false,
                 activeHint = null,
                 isGameOver = stillGameOver,
                 lineClearBursts = listOf(burst),
@@ -1852,6 +1939,378 @@ class GameViewModel(
         }
 
         return true
+    }
+
+    /**
+     * Rerolls all currently active (non-null) tray pieces with fresh shapes, guaranteeing
+     * at least one piece can be placed on the board when empty cells remain.
+     */
+    fun useShuffle(): Boolean {
+        val currentState = _gameState.value
+        if (currentState.isGameOver) return false
+        if (currentState.activePieces.none { it != null }) return false
+
+        if (currentState.shuffleCount <= 0) {
+            showTemporaryBanner("NO SHUFFLES LEFT! VISIT SHOP OR WATCH AD")
+            return false
+        }
+
+        hasUserInteractedThisSession = true
+        lastUndoSnapshot = UndoSnapshot(
+            grid = currentState.grid,
+            activePieces = currentState.activePieces,
+            score = currentState.score,
+            highScore = currentState.highScore,
+            comboStreak = currentState.comboStreak,
+            maxComboSession = currentState.maxComboSession,
+            linesClearedSession = currentState.linesClearedSession,
+            isGameOver = currentState.isGameOver,
+            isNewHighScore = currentState.isNewHighScore,
+            dailyBatchIndex = currentState.dailyBatchIndex,
+            hammerCount = currentState.hammerCount,
+            shuffleCount = currentState.shuffleCount,
+            bombCount = currentState.bombCount,
+            timeRemainingMs = currentState.timeRemainingMs,
+            gameOverReason = currentState.gameOverReason
+        )
+
+        var nextBatchIndex = currentState.dailyBatchIndex
+        var candidateTray: List<BlockShape?> = emptyList()
+        repeat(6) { attempt ->
+            val freshBatch = if (currentState.gameMode == GameMode.DAILY_CHALLENGE) {
+                nextBatchIndex++
+                ShapeDefinitions.getDailyShapeBatch(
+                    dateSeed = computeDailySeed() + attempt * 71L,
+                    batchIndex = nextBatchIndex,
+                    currentScore = currentState.score
+                )
+            } else {
+                ShapeDefinitions.getRandomShapeBatch(currentScore = currentState.score)
+            }
+            val mapped = currentState.activePieces.mapIndexed { idx, existing ->
+                if (existing != null) freshBatch.getOrNull(idx) ?: freshBatch.first() else null
+            }
+            candidateTray = mapped
+            if (!checkGameOver(currentState.grid, mapped)) {
+                return@repeat
+            }
+        }
+
+        // Guarantee at least one piece fits if the board isn't completely full
+        if (checkGameOver(currentState.grid, candidateTray)) {
+            val fittingSpec = ShapeDefinitions.getAvailableSpecsForScore(currentState.score)
+                .map { it.toBlockShape() }
+                .firstOrNull { canFitAnywhere(currentState.grid, it) }
+                ?: ShapeDefinitions.getAvailableSpecsForScore(0)
+                    .map { it.toBlockShape() }
+                    .firstOrNull { canFitAnywhere(currentState.grid, it) }
+
+            if (fittingSpec != null) {
+                val firstSlot = candidateTray.indexOfFirst { it != null }
+                if (firstSlot >= 0) {
+                    val mutable = candidateTray.toMutableList()
+                    mutable[firstSlot] = fittingSpec
+                    candidateTray = mutable
+                }
+            }
+        }
+
+        val nextShuffleCount = (currentState.shuffleCount - 1).coerceAtLeast(0)
+        preferences.shuffleCount = nextShuffleCount
+        val stillGameOver = checkGameOver(currentState.grid, candidateTray)
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val shuffleBanner = "🔄 TRAY SHUFFLED!"
+        _gameState.update {
+            it.copy(
+                activePieces = candidateTray,
+                shuffleCount = nextShuffleCount,
+                dailyBatchIndex = nextBatchIndex,
+                isHammerActive = false,
+                isBombActive = false,
+                selectedShapeIndex = null,
+                activeHint = null,
+                hoverRow = null,
+                hoverCol = null,
+                hoverPreviewCells = emptySet(),
+                prospectiveRows = emptySet(),
+                prospectiveCols = emptySet(),
+                isGameOver = stillGameOver,
+                comboBannerText = shuffleBanner,
+                canUndo = true
+            )
+        }
+
+        flushSession(syncToCloud = true)
+        viewModelScope.launch {
+            delay(1400)
+            _gameState.update {
+                if (it.comboBannerText == shuffleBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    /**
+     * Toggles the 3x3 Area Bomb targeting mode on or off.
+     */
+    fun toggleBombMode() {
+        val current = _gameState.value
+        if (current.bombCount <= 0 && !current.isBombActive) {
+            showTemporaryBanner("NO BOMBS LEFT! VISIT SHOP OR WATCH AD")
+            return
+        }
+
+        val willBeActive = !current.isBombActive
+        _gameState.update {
+            it.copy(
+                isBombActive = willBeActive,
+                isHammerActive = if (willBeActive) false else it.isHammerActive,
+                selectedShapeIndex = if (willBeActive) null else it.selectedShapeIndex,
+                activeHint = if (willBeActive) null else it.activeHint,
+                hoverPreviewCells = if (willBeActive) emptySet() else it.hoverPreviewCells,
+                prospectiveRows = if (willBeActive) emptySet() else it.prospectiveRows,
+                prospectiveCols = if (willBeActive) emptySet() else it.prospectiveCols,
+                comboBannerText = if (willBeActive) "💣 TAP BOARD TO BLAST 3×3 AREA!" else null
+            )
+        }
+
+        if (willBeActive) {
+            soundManager.playPickup()
+            triggerHaptic(HapticEffect.Pickup)
+        }
+    }
+
+    /**
+     * Detonates a 3x3 bomb centered at ([row], [col]), clearing up to 9 cells.
+     */
+    fun useBombOnCell(row: Int, col: Int): Boolean {
+        val currentState = _gameState.value
+        if (!currentState.isBombActive || currentState.bombCount <= 0) return false
+        if (row !in 0 until 8 || col !in 0 until 8) return false
+
+        val minR = (row - 1).coerceAtLeast(0)
+        val maxR = (row + 1).coerceAtMost(7)
+        val minC = (col - 1).coerceAtLeast(0)
+        val maxC = (col + 1).coerceAtMost(7)
+
+        val bursts = mutableListOf<LineClearBurst>()
+        for (r in minR..maxR) {
+            for (c in minC..maxC) {
+                val cellColor = currentState.grid[r][c]
+                if (cellColor > 0) {
+                    bursts.add(
+                        LineClearBurst(
+                            row = r,
+                            col = c,
+                            colorId = cellColor,
+                            comboMultiplier = 3,
+                            isRowClear = true,
+                            isColClear = true
+                        )
+                    )
+                }
+            }
+        }
+        if (bursts.isEmpty()) return false
+
+        hasUserInteractedThisSession = true
+        lastUndoSnapshot = UndoSnapshot(
+            grid = currentState.grid,
+            activePieces = currentState.activePieces,
+            score = currentState.score,
+            highScore = currentState.highScore,
+            comboStreak = currentState.comboStreak,
+            maxComboSession = currentState.maxComboSession,
+            linesClearedSession = currentState.linesClearedSession,
+            isGameOver = currentState.isGameOver,
+            isNewHighScore = currentState.isNewHighScore,
+            dailyBatchIndex = currentState.dailyBatchIndex,
+            hammerCount = currentState.hammerCount,
+            shuffleCount = currentState.shuffleCount,
+            bombCount = currentState.bombCount,
+            timeRemainingMs = currentState.timeRemainingMs,
+            gameOverReason = currentState.gameOverReason
+        )
+
+        val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
+        for (b in bursts) {
+            newGrid[b.row][b.col] = 0
+        }
+        val frozenGrid = newGrid.map { it.toList() }
+
+        val newBombCount = (currentState.bombCount - 1).coerceAtLeast(0)
+        preferences.bombCount = newBombCount
+
+        soundManager.playHammerSmash()
+        triggerHaptic(HapticEffect.LineClear(3))
+
+        val stillGameOver = checkGameOver(frozenGrid, currentState.activePieces)
+        val bombBanner = "💣 3×3 BLAST! ${bursts.size} BLOCKS CLEARED!"
+
+        _gameState.update {
+            it.copy(
+                grid = frozenGrid,
+                bombCount = newBombCount,
+                isBombActive = false,
+                isHammerActive = false,
+                activeHint = null,
+                isGameOver = stillGameOver,
+                lineClearBursts = bursts,
+                comboBannerText = bombBanner,
+                canUndo = true
+            )
+        }
+
+        flushSession(syncToCloud = true)
+
+        viewModelScope.launch {
+            delay(450)
+            _gameState.update { it.copy(lineClearBursts = emptyList()) }
+            delay(900)
+            _gameState.update {
+                if (it.comboBannerText == bombBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    /**
+     * Unlocks (with Blast Coins) or equips a board theme from the Coin Shop.
+     */
+    fun selectOrUnlockTheme(themeId: BoardThemeId): Boolean {
+        val spec = BoardThemeCatalog.allThemes.firstOrNull { it.id == themeId } ?: return false
+        val alreadyUnlocked = preferences.isThemeUnlocked(themeId.name)
+
+        if (alreadyUnlocked) {
+            preferences.selectedThemeId = themeId.name
+            soundManager.playPickup()
+            triggerHaptic(HapticEffect.Pickup)
+            val equippedBanner = "${spec.badgeEmoji} ${spec.name.uppercase()} EQUIPPED!"
+            _gameState.update {
+                it.copy(
+                    selectedThemeId = themeId.name,
+                    unlockedThemeIds = preferences.getUnlockedThemeIds(),
+                    comboBannerText = equippedBanner
+                )
+            }
+            viewModelScope.launch {
+                delay(1400)
+                _gameState.update {
+                    if (it.comboBannerText == equippedBanner) it.copy(comboBannerText = null) else it
+                }
+            }
+            return true
+        }
+
+        val currentCoins = preferences.coinsBalance
+        if (currentCoins < spec.costCoins || _gameState.value.coinsBalance < spec.costCoins) {
+            showTemporaryBanner("NEED ${spec.costCoins} 🪙 TO UNLOCK ${spec.name.uppercase()}!")
+            return false
+        }
+
+        val nextCoins = (currentCoins - spec.costCoins).coerceAtLeast(0)
+        preferences.coinsBalance = nextCoins
+        preferences.unlockTheme(themeId.name)
+        preferences.selectedThemeId = themeId.name
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val unlockedBanner = "${spec.badgeEmoji} ${spec.name.uppercase()} UNLOCKED!"
+        _gameState.update {
+            it.copy(
+                coinsBalance = nextCoins,
+                selectedThemeId = themeId.name,
+                unlockedThemeIds = preferences.getUnlockedThemeIds(),
+                comboBannerText = unlockedBanner
+            )
+        }
+        syncCoinSpendToCloud(spec.costCoins)
+
+        viewModelScope.launch {
+            delay(1600)
+            _gameState.update {
+                if (it.comboBannerText == unlockedBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    /**
+     * Purchases a gameplay booster from the Coin Shop using Blast Coins.
+     */
+    fun buyBoosterWithCoins(booster: ShopBoosterType): Boolean {
+        val currentCoins = preferences.coinsBalance
+        if (currentCoins < booster.coinCost || _gameState.value.coinsBalance < booster.coinCost) {
+            showTemporaryBanner("NEED ${booster.coinCost} 🪙 FOR ${booster.title.uppercase()}!")
+            return false
+        }
+
+        val nextCoins = (currentCoins - booster.coinCost).coerceAtLeast(0)
+        preferences.coinsBalance = nextCoins
+
+        var nextHammer = preferences.hammerCount
+        var nextHint = preferences.hintCount
+        var nextShuffle = preferences.shuffleCount
+        var nextBomb = preferences.bombCount
+
+        when (booster) {
+            ShopBoosterType.HAMMER -> {
+                nextHammer += 1
+                preferences.hammerCount = nextHammer
+            }
+            ShopBoosterType.HINT -> {
+                nextHint += 1
+                preferences.hintCount = nextHint
+            }
+            ShopBoosterType.SHUFFLE -> {
+                nextShuffle += 1
+                preferences.shuffleCount = nextShuffle
+            }
+            ShopBoosterType.BOMB -> {
+                nextBomb += 1
+                preferences.bombCount = nextBomb
+            }
+        }
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val boughtBanner = "+1 ${booster.emoji} ${booster.title.uppercase()}!"
+        _gameState.update {
+            it.copy(
+                coinsBalance = nextCoins,
+                hammerCount = nextHammer,
+                hintCount = nextHint,
+                shuffleCount = nextShuffle,
+                bombCount = nextBomb,
+                comboBannerText = boughtBanner
+            )
+        }
+        flushSession(syncToCloud = true)
+        syncCoinSpendToCloud(booster.coinCost)
+
+        viewModelScope.launch {
+            delay(1500)
+            _gameState.update {
+                if (it.comboBannerText == boughtBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    private fun syncCoinSpendToCloud(costCoins: Int) {
+        val repo = firestoreRepository ?: return
+        if (currentUserId.isBlank() || costCoins <= 0) return
+        viewModelScope.launch {
+            val spendResult = repo.spendCoinsForHammer(costCoins)
+            if (spendResult.isFailure) {
+                repo.syncDailyLoginRewardProfile(buildLocalLoginProfile())
+            }
+        }
     }
 
     fun loadDailyMissions(dateStr: String): List<DailyMission> {
@@ -2351,6 +2810,54 @@ class GameViewModel(
         _gameState.update {
             it.copy(
                 hammerCount = nextHammers,
+                comboBannerText = earnedBanner
+            )
+        }
+        flushSession(syncToCloud = true)
+
+        viewModelScope.launch {
+            delay(1600)
+            _gameState.update {
+                if (it.comboBannerText == earnedBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+    }
+
+    fun grantFreeShuffleAfterAd() {
+        val nextShuffles = preferences.shuffleCount + 1
+        preferences.shuffleCount = nextShuffles
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val earnedBanner = "+1 🔄 FREE SHUFFLE EARNED!"
+        _gameState.update {
+            it.copy(
+                shuffleCount = nextShuffles,
+                comboBannerText = earnedBanner
+            )
+        }
+        flushSession(syncToCloud = true)
+
+        viewModelScope.launch {
+            delay(1600)
+            _gameState.update {
+                if (it.comboBannerText == earnedBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+    }
+
+    fun grantFreeBombAfterAd() {
+        val nextBombs = preferences.bombCount + 1
+        preferences.bombCount = nextBombs
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val earnedBanner = "+1 💣 FREE BOMB EARNED!"
+        _gameState.update {
+            it.copy(
+                bombCount = nextBombs,
                 comboBannerText = earnedBanner
             )
         }

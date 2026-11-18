@@ -7,7 +7,9 @@ import kotlinx.coroutines.flow.StateFlow
 
 enum class RewardedAdRewardType {
     SECOND_CHANCE,
-    FREE_HAMMER
+    FREE_HAMMER,
+    FREE_SHUFFLE,
+    FREE_BOMB
 }
 
 data class AdUiState(

@@ -78,6 +78,32 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_HINT_COUNT, 2).coerceAtLeast(0)
         set(value) = prefs.edit().putInt(KEY_HINT_COUNT, value.coerceAtLeast(0)).apply()
 
+    var shuffleCount: Int
+        get() = prefs.getInt(KEY_SHUFFLE_COUNT, 2).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_SHUFFLE_COUNT, value.coerceAtLeast(0)).apply()
+
+    var bombCount: Int
+        get() = prefs.getInt(KEY_BOMB_COUNT, 1).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_BOMB_COUNT, value.coerceAtLeast(0)).apply()
+
+    var selectedThemeId: String
+        get() = prefs.getString(KEY_SELECTED_THEME_ID, com.example.model.BoardThemeId.NEON_ARCADE.name)
+            ?: com.example.model.BoardThemeId.NEON_ARCADE.name
+        set(value) = prefs.edit().putString(KEY_SELECTED_THEME_ID, value).apply()
+
+    fun getUnlockedThemeIds(): Set<String> {
+        val stored = prefs.getStringSet(KEY_UNLOCKED_THEME_IDS, emptySet()) ?: emptySet()
+        return stored + com.example.model.BoardThemeId.NEON_ARCADE.name
+    }
+
+    fun isThemeUnlocked(themeId: String): Boolean =
+        themeId == com.example.model.BoardThemeId.NEON_ARCADE.name || getUnlockedThemeIds().contains(themeId)
+
+    fun unlockTheme(themeId: String) {
+        val updated = getUnlockedThemeIds() + themeId
+        prefs.edit().putStringSet(KEY_UNLOCKED_THEME_IDS, updated).apply()
+    }
+
     var totalAllTimeScore: Long
         get() = prefs.getLong(KEY_TOTAL_ALL_TIME_SCORE, 0L)
         set(value) = prefs.edit().putLong(KEY_TOTAL_ALL_TIME_SCORE, value.coerceAtLeast(0L)).apply()
@@ -207,6 +233,10 @@ class GamePreferences(context: Context) {
         private const val KEY_DAILY_HISTORY = "key_daily_history"
         private const val KEY_HAMMER_COUNT = "key_hammer_count"
         private const val KEY_HINT_COUNT = "key_hint_count"
+        private const val KEY_SHUFFLE_COUNT = "key_shuffle_count"
+        private const val KEY_BOMB_COUNT = "key_bomb_count"
+        private const val KEY_SELECTED_THEME_ID = "key_selected_theme_id"
+        private const val KEY_UNLOCKED_THEME_IDS = "key_unlocked_theme_ids"
         private const val KEY_TOTAL_ALL_TIME_SCORE = "key_total_all_time_score"
         private const val KEY_TIME_ATTACK_HIGH_SCORE = "key_time_attack_high_score"
         private const val KEY_DAILY_CHALLENGES_COMPLETED = "key_daily_challenges_completed"

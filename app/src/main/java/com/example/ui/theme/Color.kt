@@ -1,5 +1,6 @@
 package com.example.ui.theme
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 // Background and Surface Colors (Deep arcade space)
@@ -16,6 +17,7 @@ val GhostPreviewColor = Color(0x66FFFFFF)
 val RowHighlightColor = Color(0x33FFEB3B)
 
 // Block Jewel Colors with Primary, Gradient, Border and Shadow
+@Immutable
 data class BlockPalette(
     val primary: Color,
     val light: Color,
