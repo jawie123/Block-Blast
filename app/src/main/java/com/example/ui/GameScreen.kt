@@ -93,6 +93,7 @@ import com.example.ui.components.DailyMissionsDrawer
 import com.example.ui.components.GridBoard
 import com.example.ui.components.GameOverDialog
 import com.example.ui.components.LeaderboardTab
+import com.example.ui.components.LuckySpinDialog
 import com.example.ui.components.PieceDeck
 import com.example.ui.components.PieceSlot
 import com.example.ui.components.ScoreHeader
@@ -132,6 +133,7 @@ fun GameScreen(
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showShopDialog by remember { mutableStateOf(false) }
     var showAdventureMapDialog by remember { mutableStateOf(false) }
+    var showLuckySpinDialog by remember { mutableStateOf(false) }
     var shopInitialTab by remember { mutableStateOf(ShopTab.THEMES) }
     var freeBoosterPromptType by remember { mutableStateOf<RewardedAdRewardType?>(null) }
     var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.HIGH_SCORES) }
@@ -177,6 +179,7 @@ fun GameScreen(
         showSettingsDialog,
         showShopDialog,
         showAdventureMapDialog,
+        showLuckySpinDialog,
         freeBoosterPromptType,
         gameState.isGameOver,
         gameState.adventureLevelCompleted,
@@ -192,6 +195,7 @@ fun GameScreen(
             showSettingsDialog ||
             showShopDialog ||
             showAdventureMapDialog ||
+            showLuckySpinDialog ||
             freeBoosterPromptType != null ||
             gameState.isGameOver ||
             gameState.adventureLevelCompleted
@@ -212,6 +216,7 @@ fun GameScreen(
                         RewardedAdRewardType.FREE_SHUFFLE -> viewModel.grantFreeShuffleAfterAd()
                         RewardedAdRewardType.FREE_BOMB -> viewModel.grantFreeBombAfterAd()
                         RewardedAdRewardType.FREE_ROTATE -> viewModel.grantFreeRotateAfterAd()
+                        RewardedAdRewardType.LUCKY_SPIN -> viewModel.grantBonusSpinAfterAd()
                     }
                 },
                 onAdClosedOrFailed = { errorMsg ->
@@ -380,6 +385,12 @@ fun GameScreen(
                 adventureGemsCollected = gameState.adventureGemsCollected,
                 adventureIceBroken = gameState.adventureIceBroken,
                 adventureInitialIceTotal = gameState.adventureInitialIceTotal,
+                canClaimFreeLuckySpin = gameState.canClaimFreeLuckySpin,
+                bonusSpinCount = gameState.bonusSpinCount,
+                onOpenLuckySpin = {
+                    viewModel.clearLastSpinReward()
+                    showLuckySpinDialog = true
+                },
                 onOpenAdventureMap = { showAdventureMapDialog = true },
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
@@ -692,6 +703,9 @@ fun GameScreen(
                     }
                     draggingIndex = null
                 },
+                heldPiece = gameState.heldPiece,
+                canHoldPiece = gameState.canHoldThisTurn,
+                onHoldSlotClick = { viewModel.holdOrSwapPiece() },
                 isRotateMode = gameState.isRotateActive,
                 compactMode = isCompactHeight,
                 theme = activeTheme
@@ -927,6 +941,23 @@ fun GameScreen(
                     viewModel.startAdventureLevel(lvl)
                 },
                 onDismiss = { showAdventureMapDialog = false }
+            )
+        }
+
+        // Daily Lucky Spin Wheel Dialog
+        if (showLuckySpinDialog) {
+            LuckySpinDialog(
+                canClaimFreeSpin = gameState.canClaimFreeLuckySpin,
+                bonusSpinCount = gameState.bonusSpinCount,
+                lastSpinReward = gameState.lastSpinReward,
+                isRewardedAdReady = adState.isRewardedAdReady,
+                isRewardedAdLoading = adState.isRewardedAdLoading,
+                isAdShowing = adState.isAdShowing,
+                onSpinWheel = { viewModel.spinLuckyWheel() },
+                onWatchAdForSpin = if (adCoordinator != null) {
+                    { launchRewardedAd(RewardedAdRewardType.LUCKY_SPIN) }
+                } else null,
+                onDismiss = { showLuckySpinDialog = false }
             )
         }
 

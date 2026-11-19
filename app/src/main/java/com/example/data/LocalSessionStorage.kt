@@ -187,6 +187,27 @@ class LocalSessionStorage(context: Context) {
             iceObj.put("${coord.first},${coord.second}", hits)
         }
 
+        val lightningArr = JSONArray()
+        for ((r, c) in session.lightningCells) {
+            lightningArr.put("$r,$c")
+        }
+
+        val heldPieceJson: Any = session.heldPiece?.let { shape ->
+            val matrixArr = JSONArray()
+            for (row in shape.matrix) {
+                val rowArr = JSONArray()
+                for (cell in row) rowArr.put(cell)
+                matrixArr.put(rowArr)
+            }
+            JSONObject().apply {
+                put("instanceId", shape.instanceId)
+                put("id", shape.id)
+                put("name", shape.name)
+                put("colorId", shape.colorId)
+                put("matrix", matrixArr)
+            }
+        } ?: JSONObject.NULL
+
         return JSONObject().apply {
             put("gameMode", session.gameMode.name)
             put("grid", gridArr)
@@ -207,6 +228,9 @@ class LocalSessionStorage(context: Context) {
             put("adventureIceBroken", session.adventureIceBroken)
             put("gemCells", gemsArr)
             put("iceCells", iceObj)
+            put("heldPiece", heldPieceJson)
+            put("canHoldThisTurn", session.canHoldThisTurn)
+            put("lightningCells", lightningArr)
         }
     }
 
@@ -281,6 +305,45 @@ class LocalSessionStorage(context: Context) {
             }
         }
 
+        val lightningSet = mutableSetOf<Pair<Int, Int>>()
+        val lightningArr = json.optJSONArray("lightningCells")
+        if (lightningArr != null) {
+            for (i in 0 until lightningArr.length()) {
+                val parts = lightningArr.optString(i, "").split(",")
+                if (parts.size == 2) {
+                    val r = parts[0].toIntOrNull()
+                    val c = parts[1].toIntOrNull()
+                    if (r != null && c != null && r in 0..7 && c in 0..7) {
+                        lightningSet.add(r to c)
+                    }
+                }
+            }
+        }
+
+        val heldShape: BlockShape? = json.optJSONObject("heldPiece")?.let { pObj ->
+            val id = pObj.optString("id", "")
+            val name = pObj.optString("name", id)
+            val colorId = pObj.optInt("colorId", 1)
+            val instanceId = pObj.optString("instanceId", java.util.UUID.randomUUID().toString())
+            val matrixArr = pObj.optJSONArray("matrix")
+            if (matrixArr == null) {
+                null
+            } else {
+                val matrix = (0 until matrixArr.length()).map { r ->
+                    val rArr = matrixArr.getJSONArray(r)
+                    (0 until rArr.length()).map { c -> rArr.getBoolean(c) }
+                }
+                if (matrix.isEmpty() || matrix[0].isEmpty()) null
+                else BlockShape(
+                    instanceId = instanceId,
+                    id = id,
+                    name = name,
+                    matrix = matrix,
+                    colorId = colorId
+                )
+            }
+        }
+
         return SavedGameSessionData(
             gameMode = gameMode,
             grid = grid,
@@ -300,7 +363,10 @@ class LocalSessionStorage(context: Context) {
             adventureGemsCollected = json.optInt("adventureGemsCollected", 0).coerceAtLeast(0),
             adventureIceBroken = json.optInt("adventureIceBroken", 0).coerceAtLeast(0),
             gemCells = gemSet,
-            iceCells = iceMap
+            iceCells = iceMap,
+            heldPiece = heldShape,
+            canHoldThisTurn = json.optBoolean("canHoldThisTurn", true),
+            lightningCells = lightningSet
         )
     }
 

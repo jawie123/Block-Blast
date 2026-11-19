@@ -28,12 +28,15 @@ import com.example.model.GameMode
 import com.example.model.GameOverReason
 import com.example.model.GameState
 import com.example.model.LineClearBurst
+import com.example.model.LuckySpinCatalog
+import com.example.model.LuckySpinResult
 import com.example.model.MissionType
 import com.example.model.PlacementHint
 import com.example.model.SavedGameSessionData
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
 import com.example.model.ShopBoosterType
+import com.example.model.SpinRewardType
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -78,6 +81,8 @@ class GameViewModel(
             shuffleCount = preferences.shuffleCount,
             bombCount = preferences.bombCount,
             rotateCount = preferences.rotateCount,
+            canClaimFreeLuckySpin = preferences.canClaimFreeSpinToday(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())),
+            bonusSpinCount = preferences.bonusSpinCount,
             adventureLevelNumber = preferences.adventureCurrentLevel,
             adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
             selectedThemeId = preferences.selectedThemeId,
@@ -358,6 +363,11 @@ class GameViewModel(
             isBombActive = false,
             rotateCount = preferences.rotateCount,
             isRotateActive = false,
+            heldPiece = session.heldPiece,
+            canHoldThisTurn = session.canHoldThisTurn,
+            lightningCells = session.lightningCells,
+            canClaimFreeLuckySpin = preferences.canClaimFreeSpinToday(getTodayDateString()),
+            bonusSpinCount = preferences.bonusSpinCount,
             gemCells = if (isAdventure) session.gemCells else emptySet(),
             iceCells = if (isAdventure) session.iceCells else emptyMap(),
             adventureLevelNumber = adventureLevelSpec.levelNumber,
@@ -620,7 +630,10 @@ class GameViewModel(
             adventureGemsCollected = state.adventureGemsCollected,
             adventureIceBroken = state.adventureIceBroken,
             gemCells = state.gemCells,
-            iceCells = state.iceCells
+            iceCells = state.iceCells,
+            heldPiece = state.heldPiece,
+            canHoldThisTurn = state.canHoldThisTurn,
+            lightningCells = state.lightningCells
         )
         localSessionStorage?.saveSessionBackground(session)
 
@@ -664,6 +677,9 @@ class GameViewModel(
         val rotateCount: Int = 3,
         val gemCells: Set<Pair<Int, Int>> = emptySet(),
         val iceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
+        val heldPiece: BlockShape? = null,
+        val canHoldThisTurn: Boolean = true,
+        val lightningCells: Set<Pair<Int, Int>> = emptySet(),
         val adventureGemsCollected: Int = 0,
         val adventureIceBroken: Int = 0,
         val adventureLevelCompleted: Boolean = false,
@@ -824,6 +840,12 @@ class GameViewModel(
             isBombActive = false,
             rotateCount = preferences.rotateCount,
             isRotateActive = false,
+            heldPiece = null,
+            canHoldThisTurn = true,
+            lightningCells = emptySet(),
+            canClaimFreeLuckySpin = preferences.canClaimFreeSpinToday(dateStr),
+            bonusSpinCount = preferences.bonusSpinCount,
+            lastSpinReward = null,
             gemCells = if (isAdventure) adventureSpec.initialGemCells else emptySet(),
             iceCells = if (isAdventure) adventureSpec.initialIceCells else emptyMap(),
             adventureLevelNumber = adventureSpec.levelNumber,
@@ -969,6 +991,9 @@ class GameViewModel(
                 shuffleCount = snapshot.shuffleCount,
                 bombCount = snapshot.bombCount,
                 rotateCount = snapshot.rotateCount,
+                heldPiece = snapshot.heldPiece,
+                canHoldThisTurn = snapshot.canHoldThisTurn,
+                lightningCells = snapshot.lightningCells,
                 gemCells = snapshot.gemCells,
                 iceCells = snapshot.iceCells,
                 adventureGemsCollected = snapshot.adventureGemsCollected,
@@ -1286,6 +1311,9 @@ class GameViewModel(
             rotateCount = currentState.rotateCount,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
+            heldPiece = currentState.heldPiece,
+            canHoldThisTurn = currentState.canHoldThisTurn,
+            lightningCells = currentState.lightningCells,
             adventureGemsCollected = currentState.adventureGemsCollected,
             adventureIceBroken = currentState.adventureIceBroken,
             adventureLevelCompleted = currentState.adventureLevelCompleted,
@@ -1327,8 +1355,11 @@ class GameViewModel(
 
         val mutableIce = currentState.iceCells.toMutableMap()
         val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLightning = currentState.lightningCells.toMutableSet()
         var gemsCollectedThisMove = 0
         var iceBrokenThisMove = 0
+        var laserExtraPoints = 0
+        var lasersTriggeredCount = 0
         var perfectBoardClear = false
 
         if (totalLines > 0) {
@@ -1354,6 +1385,43 @@ class GameViewModel(
                 }
             }
 
+            // Expand Cross-Laser (⚡) row + col chain reaction when any lightning tile is cleared
+            val laserQueue = ArrayDeque<Pair<Int, Int>>()
+            val seenLasers = mutableSetOf<Pair<Int, Int>>()
+            val laserBlastedCoords = mutableSetOf<Pair<Int, Int>>()
+            for (coord in clearingCoords) {
+                if (mutableLightning.remove(coord) && seenLasers.add(coord)) {
+                    laserQueue.addLast(coord)
+                }
+            }
+            while (laserQueue.isNotEmpty()) {
+                val (lr, lc) = laserQueue.removeFirst()
+                lasersTriggeredCount++
+                for (i in 0 until 8) {
+                    val rowCoord = lr to i
+                    if (newGrid[lr][i] > 0 || rowCoord in mutableLightning) {
+                        if (rowCoord !in clearingCoords) {
+                            laserBlastedCoords.add(rowCoord)
+                        }
+                        if (mutableLightning.remove(rowCoord) && seenLasers.add(rowCoord)) {
+                            laserQueue.addLast(rowCoord)
+                        }
+                    }
+                    val colCoord = i to lc
+                    if (newGrid[i][lc] > 0 || colCoord in mutableLightning) {
+                        if (colCoord !in clearingCoords) {
+                            laserBlastedCoords.add(colCoord)
+                        }
+                        if (mutableLightning.remove(colCoord) && seenLasers.add(colCoord)) {
+                            laserQueue.addLast(colCoord)
+                        }
+                    }
+                }
+            }
+            clearingCoords.addAll(laserBlastedCoords)
+            laserExtraPoints = laserBlastedCoords.size * 15
+            linePoints += laserExtraPoints
+
             for (coord in clearingCoords) {
                 val r = coord.first
                 val c = coord.second
@@ -1363,9 +1431,9 @@ class GameViewModel(
                         row = r,
                         col = c,
                         colorId = if (tileColor > 0) tileColor else shape.colorId,
-                        comboMultiplier = newCombo,
-                        isRowClear = completedRows.contains(r),
-                        isColClear = completedCols.contains(c)
+                        comboMultiplier = maxOf(newCombo, if (lasersTriggeredCount > 0) 3 else 1),
+                        isRowClear = completedRows.contains(r) || lasersTriggeredCount > 0,
+                        isColClear = completedCols.contains(c) || lasersTriggeredCount > 0
                     )
                 )
             }
@@ -1394,9 +1462,9 @@ class GameViewModel(
                 linePoints += PERFECT_BOARD_CLEAR_POINTS
                 soundManager.playComboCheer()
                 triggerHaptic(HapticEffect.PowerUp)
-            } else if (newCombo >= 2) {
+            } else if (lasersTriggeredCount > 0 || newCombo >= 2) {
                 soundManager.playComboCheer()
-                triggerHaptic(HapticEffect.LineClear(newCombo))
+                triggerHaptic(HapticEffect.LineClear(maxOf(newCombo, 3)))
             } else {
                 soundManager.playLineClear(newCombo)
                 triggerHaptic(HapticEffect.LineClear(newCombo))
@@ -1623,12 +1691,34 @@ class GameViewModel(
             triggerHaptic(HapticEffect.PowerUp)
         }
 
-        val boardClearBanner = if (perfectBoardClear) {
-            "✨ PERFECT BOARD CLEAR! +$PERFECT_BOARD_CLEAR_POINTS PTS • +$PERFECT_BOARD_CLEAR_COINS 🪙"
-        } else if (gemsCollectedThisMove > 0) {
-            "💎 +$gemsCollectedThisMove GEM${if (gemsCollectedThisMove > 1) "S" else ""} • +${gemCoinBonus} 🪙"
-        } else {
-            null
+        // Spawn a ⚡ Cross-Laser Power-Block on multi-line clears (2+ lines) when board blocks remain
+        var spawnedLightningNow = false
+        if (totalLines >= 2 && !perfectBoardClear && !adventureCompletedNow && mutableLightning.size < 2) {
+            val eligibleForLaser = mutableListOf<Pair<Int, Int>>()
+            for (r in 0 until 8) {
+                for (c in 0 until 8) {
+                    val coord = r to c
+                    if (newGrid[r][c] > 0 &&
+                        coord !in mutableIce &&
+                        coord !in mutableGems &&
+                        coord !in mutableLightning
+                    ) {
+                        eligibleForLaser.add(coord)
+                    }
+                }
+            }
+            if (eligibleForLaser.isNotEmpty()) {
+                mutableLightning.add(eligibleForLaser.random())
+                spawnedLightningNow = true
+            }
+        }
+
+        val boardClearBanner = when {
+            perfectBoardClear -> "✨ PERFECT BOARD CLEAR! +$PERFECT_BOARD_CLEAR_POINTS PTS • +$PERFECT_BOARD_CLEAR_COINS 🪙"
+            lasersTriggeredCount > 0 -> "⚡ CROSS-LASER BLAST! +$totalMovePoints"
+            gemsCollectedThisMove > 0 -> "💎 +$gemsCollectedThisMove GEM${if (gemsCollectedThisMove > 1) "S" else ""} • +${gemCoinBonus} 🪙"
+            spawnedLightningNow -> "⚡ CROSS-LASER CHARGED! +$totalMovePoints"
+            else -> null
         }
         val finalBannerText = boardClearBanner ?: bannerText
         if (perfectBoardClear) {
@@ -1659,7 +1749,7 @@ class GameViewModel(
             newHigh,
             computeLocalOverallBestScore(currentState.dailyDate.ifEmpty { getTodayDateString() })
         )
-        val shouldShake = perfectBoardClear || totalLines >= 3
+        val shouldShake = perfectBoardClear || totalLines >= 3 || lasersTriggeredCount > 0
         _gameState.update {
             it.copy(
                 grid = frozenGrid,
@@ -1703,6 +1793,8 @@ class GameViewModel(
                 totalShapeVariety = ShapeDefinitions.totalShapeVarietyCount,
                 timeRemainingMs = updatedTimeMs,
                 lastTimeBonusSeconds = bonusSeconds,
+                canHoldThisTurn = true,
+                lightningCells = mutableLightning.toSet(),
                 gemCells = mutableGems.toSet(),
                 iceCells = mutableIce.toMap(),
                 adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
@@ -2131,6 +2223,9 @@ class GameViewModel(
             rotateCount = currentState.rotateCount,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
+            heldPiece = currentState.heldPiece,
+            canHoldThisTurn = currentState.canHoldThisTurn,
+            lightningCells = currentState.lightningCells,
             adventureGemsCollected = currentState.adventureGemsCollected,
             adventureIceBroken = currentState.adventureIceBroken,
             adventureLevelCompleted = currentState.adventureLevelCompleted,
@@ -2140,52 +2235,102 @@ class GameViewModel(
 
         val coord = row to col
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
-        newGrid[row][col] = 0
+        val mutableIce = currentState.iceCells.toMutableMap()
+        val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLightning = currentState.lightningCells.toMutableSet()
+
+        val clearedCoords = linkedSetOf(coord)
+        val laserQueue = ArrayDeque<Pair<Int, Int>>()
+        val seenLasers = mutableSetOf<Pair<Int, Int>>()
+        if (mutableLightning.remove(coord) && seenLasers.add(coord)) {
+            laserQueue.addLast(coord)
+        }
+        while (laserQueue.isNotEmpty()) {
+            val (lr, lc) = laserQueue.removeFirst()
+            for (i in 0 until 8) {
+                val rCoord = lr to i
+                if (newGrid[lr][i] > 0 || rCoord in mutableLightning) {
+                    clearedCoords.add(rCoord)
+                    if (mutableLightning.remove(rCoord) && seenLasers.add(rCoord)) {
+                        laserQueue.addLast(rCoord)
+                    }
+                }
+                val cCoord = i to lc
+                if (newGrid[i][lc] > 0 || cCoord in mutableLightning) {
+                    clearedCoords.add(cCoord)
+                    if (mutableLightning.remove(cCoord) && seenLasers.add(cCoord)) {
+                        laserQueue.addLast(cCoord)
+                    }
+                }
+            }
+        }
+
+        val bursts = mutableListOf<LineClearBurst>()
+        var gemsAdded = 0
+        var iceAdded = 0
+        for (cItem in clearedCoords) {
+            val r = cItem.first
+            val c = cItem.second
+            val tileColor = newGrid[r][c]
+            bursts.add(
+                LineClearBurst(
+                    row = r,
+                    col = c,
+                    colorId = if (tileColor > 0) tileColor else cellColor,
+                    comboMultiplier = if (seenLasers.isNotEmpty()) 3 else 1,
+                    isRowClear = true,
+                    isColClear = true
+                )
+            )
+            newGrid[r][c] = 0
+            if (mutableIce.remove(cItem) != null) iceAdded++
+            if (mutableGems.remove(cItem)) gemsAdded++
+        }
+
+        val laserBonusPts = if (seenLasers.isNotEmpty()) (clearedCoords.size - 1).coerceAtLeast(0) * 15 else 0
+        val nextScore = currentState.score + laserBonusPts
+        val nextHigh = maxOf(currentState.highScore, nextScore)
         val frozenGrid = newGrid.map { it.toList() }
 
-        val mutableIce = currentState.iceCells.toMutableMap()
-        val hadIce = mutableIce.remove(coord) != null
-        val mutableGems = currentState.gemCells.toMutableSet()
-        val hadGem = mutableGems.remove(coord)
-        if (hadGem) {
-            preferences.coinsBalance = preferences.coinsBalance + 5
-            preferences.totalCoinsEarned = preferences.totalCoinsEarned + 5
+        if (gemsAdded > 0) {
+            preferences.coinsBalance = preferences.coinsBalance + gemsAdded * 5
+            preferences.totalCoinsEarned = preferences.totalCoinsEarned + gemsAdded * 5
         }
-        val nextGemsCollected = currentState.adventureGemsCollected + if (hadGem) 1 else 0
-        val nextIceBroken = currentState.adventureIceBroken + if (hadIce) 1 else 0
+        val nextGemsCollected = currentState.adventureGemsCollected + gemsAdded
+        val nextIceBroken = currentState.adventureIceBroken + iceAdded
 
         val newHammerCount = (currentState.hammerCount - 1).coerceAtLeast(0)
         preferences.hammerCount = newHammerCount
 
-        soundManager.playHammerSmash()
-        triggerHaptic(HapticEffect.HammerSmash)
-
-        val burst = LineClearBurst(
-            row = row,
-            col = col,
-            colorId = cellColor,
-            comboMultiplier = 1,
-            isRowClear = true,
-            isColClear = true
-        )
+        if (seenLasers.isNotEmpty()) {
+            soundManager.playComboCheer()
+            triggerHaptic(HapticEffect.LineClear(3))
+        } else {
+            soundManager.playHammerSmash()
+            triggerHaptic(HapticEffect.HammerSmash)
+        }
 
         val adventureDone = evaluateAdventureClearAfterBooster(
-            state = currentState,
+            state = currentState.copy(score = nextScore),
             nextIce = mutableIce,
             nextGemsCollected = nextGemsCollected
         )
         val stillGameOver = if (adventureDone) false else checkGameOver(frozenGrid, currentState.activePieces)
+        val hammerBanner = if (seenLasers.isNotEmpty()) "⚡ LASER SMASH! +$laserBonusPts PTS" else "BLOCK SMASHED! 🔨"
 
         _gameState.update {
             it.copy(
                 grid = frozenGrid,
+                score = nextScore,
+                highScore = nextHigh,
+                lightningCells = mutableLightning.toSet(),
                 gemCells = mutableGems.toSet(),
                 iceCells = mutableIce.toMap(),
                 adventureGemsCollected = nextGemsCollected,
                 adventureIceBroken = nextIceBroken,
                 adventureLevelCompleted = adventureDone || it.adventureLevelCompleted,
                 adventureEarnedStars = if (adventureDone && !it.adventureLevelCompleted) {
-                    AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), it.score)
+                    AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), nextScore)
                 } else it.adventureEarnedStars,
                 adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
                 coinsBalance = preferences.coinsBalance,
@@ -2195,8 +2340,9 @@ class GameViewModel(
                 isRotateActive = false,
                 activeHint = null,
                 isGameOver = stillGameOver,
-                lineClearBursts = listOf(burst),
-                comboBannerText = "BLOCK SMASHED! 🔨",
+                lineClearBursts = bursts,
+                comboBannerText = hammerBanner,
+                shakeEventId = if (seenLasers.isNotEmpty()) it.shakeEventId + 1L else it.shakeEventId,
                 canUndo = true
             )
         }
@@ -2208,7 +2354,9 @@ class GameViewModel(
             delay(400)
             _gameState.update { it.copy(lineClearBursts = emptyList()) }
             delay(800)
-            _gameState.update { it.copy(comboBannerText = null) }
+            _gameState.update {
+                if (it.comboBannerText == hammerBanner) it.copy(comboBannerText = null) else it
+            }
         }
 
         return true
@@ -2243,6 +2391,15 @@ class GameViewModel(
             hammerCount = currentState.hammerCount,
             shuffleCount = currentState.shuffleCount,
             bombCount = currentState.bombCount,
+            rotateCount = currentState.rotateCount,
+            gemCells = currentState.gemCells,
+            iceCells = currentState.iceCells,
+            heldPiece = currentState.heldPiece,
+            canHoldThisTurn = currentState.canHoldThisTurn,
+            lightningCells = currentState.lightningCells,
+            adventureGemsCollected = currentState.adventureGemsCollected,
+            adventureIceBroken = currentState.adventureIceBroken,
+            adventureLevelCompleted = currentState.adventureLevelCompleted,
             timeRemainingMs = currentState.timeRemainingMs,
             gameOverReason = currentState.gameOverReason
         )
@@ -2407,6 +2564,9 @@ class GameViewModel(
             rotateCount = currentState.rotateCount,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
+            heldPiece = currentState.heldPiece,
+            canHoldThisTurn = currentState.canHoldThisTurn,
+            lightningCells = currentState.lightningCells,
             adventureGemsCollected = currentState.adventureGemsCollected,
             adventureIceBroken = currentState.adventureIceBroken,
             adventureLevelCompleted = currentState.adventureLevelCompleted,
@@ -2417,14 +2577,59 @@ class GameViewModel(
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
         val mutableIce = currentState.iceCells.toMutableMap()
         val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLightning = currentState.lightningCells.toMutableSet()
+
+        val initialBombCoords = bursts.map { it.row to it.col }.toMutableSet()
+        val allClearedCoords = linkedSetOf<Pair<Int, Int>>().apply { addAll(initialBombCoords) }
+        val laserQueue = ArrayDeque<Pair<Int, Int>>()
+        val seenLasers = mutableSetOf<Pair<Int, Int>>()
+        for (coord in initialBombCoords) {
+            if (mutableLightning.remove(coord) && seenLasers.add(coord)) {
+                laserQueue.addLast(coord)
+            }
+        }
+        while (laserQueue.isNotEmpty()) {
+            val (lr, lc) = laserQueue.removeFirst()
+            for (i in 0 until 8) {
+                val rCoord = lr to i
+                if (newGrid[lr][i] > 0 || rCoord in mutableLightning) {
+                    allClearedCoords.add(rCoord)
+                    if (mutableLightning.remove(rCoord) && seenLasers.add(rCoord)) {
+                        laserQueue.addLast(rCoord)
+                    }
+                }
+                val cCoord = i to lc
+                if (newGrid[i][lc] > 0 || cCoord in mutableLightning) {
+                    allClearedCoords.add(cCoord)
+                    if (mutableLightning.remove(cCoord) && seenLasers.add(cCoord)) {
+                        laserQueue.addLast(cCoord)
+                    }
+                }
+            }
+        }
+
+        val allBursts = mutableListOf<LineClearBurst>()
         var gemsAdded = 0
         var iceAdded = 0
-        for (b in bursts) {
-            val coord = b.row to b.col
-            newGrid[b.row][b.col] = 0
+        for (coord in allClearedCoords) {
+            val tileColor = newGrid[coord.first][coord.second]
+            allBursts.add(
+                LineClearBurst(
+                    row = coord.first,
+                    col = coord.second,
+                    colorId = if (tileColor > 0) tileColor else 1,
+                    comboMultiplier = 3,
+                    isRowClear = true,
+                    isColClear = true
+                )
+            )
+            newGrid[coord.first][coord.second] = 0
             if (mutableIce.remove(coord) != null) iceAdded++
             if (mutableGems.remove(coord)) gemsAdded++
         }
+        val laserBonusPts = if (seenLasers.isNotEmpty()) (allClearedCoords.size - initialBombCoords.size).coerceAtLeast(0) * 15 else 0
+        val nextScore = currentState.score + laserBonusPts
+        val nextHigh = maxOf(currentState.highScore, nextScore)
         if (gemsAdded > 0) {
             preferences.coinsBalance = preferences.coinsBalance + gemsAdded * 5
             preferences.totalCoinsEarned = preferences.totalCoinsEarned + gemsAdded * 5
@@ -2440,23 +2645,30 @@ class GameViewModel(
         triggerHaptic(HapticEffect.LineClear(3))
 
         val adventureDone = evaluateAdventureClearAfterBooster(
-            state = currentState,
+            state = currentState.copy(score = nextScore),
             nextIce = mutableIce,
             nextGemsCollected = nextGemsCollected
         )
         val stillGameOver = if (adventureDone) false else checkGameOver(frozenGrid, currentState.activePieces)
-        val bombBanner = "💣 3×3 BLAST! ${bursts.size} BLOCKS CLEARED!"
+        val bombBanner = if (seenLasers.isNotEmpty()) {
+            "💣⚡ LASER BOMB! ${allClearedCoords.size} BLOCKS BLASTED!"
+        } else {
+            "💣 3×3 BLAST! ${allClearedCoords.size} BLOCKS CLEARED!"
+        }
 
         _gameState.update {
             it.copy(
                 grid = frozenGrid,
+                score = nextScore,
+                highScore = nextHigh,
+                lightningCells = mutableLightning.toSet(),
                 gemCells = mutableGems.toSet(),
                 iceCells = mutableIce.toMap(),
                 adventureGemsCollected = nextGemsCollected,
                 adventureIceBroken = nextIceBroken,
                 adventureLevelCompleted = adventureDone || it.adventureLevelCompleted,
                 adventureEarnedStars = if (adventureDone && !it.adventureLevelCompleted) {
-                    AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), it.score)
+                    AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), nextScore)
                 } else it.adventureEarnedStars,
                 adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
                 coinsBalance = preferences.coinsBalance,
@@ -2466,7 +2678,7 @@ class GameViewModel(
                 isRotateActive = false,
                 activeHint = null,
                 isGameOver = stillGameOver,
-                lineClearBursts = bursts,
+                lineClearBursts = allBursts,
                 comboBannerText = bombBanner,
                 shakeEventId = it.shakeEventId + 1L,
                 canUndo = true
@@ -2688,6 +2900,9 @@ class GameViewModel(
             rotateCount = currentState.rotateCount,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
+            heldPiece = currentState.heldPiece,
+            canHoldThisTurn = currentState.canHoldThisTurn,
+            lightningCells = currentState.lightningCells,
             adventureGemsCollected = currentState.adventureGemsCollected,
             adventureIceBroken = currentState.adventureIceBroken,
             adventureLevelCompleted = currentState.adventureLevelCompleted,
@@ -3353,6 +3568,229 @@ class GameViewModel(
                 if (it.comboBannerText == earnedBanner) it.copy(comboBannerText = null) else it
             }
         }
+    }
+
+    /**
+     * Hold Piece Pocket: Stores a tray piece in the Hold pocket, swaps the selected tray piece
+     * with the currently held piece, or recalls the held piece into an open tray slot.
+     * Allowed once per block placement turn.
+     */
+    fun holdOrSwapPiece(pieceIndexOverride: Int? = null): Boolean {
+        val currentState = _gameState.value
+        if (currentState.isGameOver) return false
+        if (!currentState.canHoldThisTurn) {
+            showTemporaryBanner("PLACE A BLOCK TO RECHARGE HOLD!")
+            return false
+        }
+
+        val currentHeld = currentState.heldPiece
+        val explicitIdx = pieceIndexOverride ?: currentState.selectedShapeIndex
+        val tray = currentState.activePieces.toMutableList()
+
+        val nextHeld: BlockShape?
+        val nextTrayCandidate: MutableList<BlockShape?>
+        val bannerText: String
+
+        if (currentHeld == null) {
+            val targetIdx = explicitIdx ?: tray.indexOfFirst { it != null }
+            val pieceToHold = tray.getOrNull(targetIdx) ?: return false
+            nextHeld = pieceToHold
+            nextTrayCandidate = tray
+            nextTrayCandidate[targetIdx] = null
+            bannerText = "📦 PIECE HELD!"
+        } else if (explicitIdx != null && tray.getOrNull(explicitIdx) != null) {
+            val trayPiece = tray[explicitIdx]!!
+            nextHeld = trayPiece
+            nextTrayCandidate = tray
+            nextTrayCandidate[explicitIdx] = currentHeld
+            bannerText = "🔁 PIECE SWAPPED!"
+        } else {
+            val emptySlot = tray.indexOfFirst { it == null }
+            if (emptySlot >= 0) {
+                nextHeld = null
+                nextTrayCandidate = tray
+                nextTrayCandidate[emptySlot] = currentHeld
+                bannerText = "📦 HELD PIECE RECALLED!"
+            } else {
+                val firstOccupied = tray.indexOfFirst { it != null }
+                if (firstOccupied < 0) return false
+                nextHeld = tray[firstOccupied]
+                nextTrayCandidate = tray
+                nextTrayCandidate[firstOccupied] = currentHeld
+                bannerText = "🔁 PIECE SWAPPED!"
+            }
+        }
+
+        hasUserInteractedThisSession = true
+        lastUndoSnapshot = UndoSnapshot(
+            grid = currentState.grid,
+            activePieces = currentState.activePieces,
+            score = currentState.score,
+            highScore = currentState.highScore,
+            comboStreak = currentState.comboStreak,
+            maxComboSession = currentState.maxComboSession,
+            linesClearedSession = currentState.linesClearedSession,
+            isGameOver = currentState.isGameOver,
+            isNewHighScore = currentState.isNewHighScore,
+            dailyBatchIndex = currentState.dailyBatchIndex,
+            hammerCount = currentState.hammerCount,
+            shuffleCount = currentState.shuffleCount,
+            bombCount = currentState.bombCount,
+            rotateCount = currentState.rotateCount,
+            gemCells = currentState.gemCells,
+            iceCells = currentState.iceCells,
+            heldPiece = currentState.heldPiece,
+            canHoldThisTurn = currentState.canHoldThisTurn,
+            lightningCells = currentState.lightningCells,
+            adventureGemsCollected = currentState.adventureGemsCollected,
+            adventureIceBroken = currentState.adventureIceBroken,
+            adventureLevelCompleted = currentState.adventureLevelCompleted,
+            timeRemainingMs = currentState.timeRemainingMs,
+            gameOverReason = currentState.gameOverReason
+        )
+
+        var nextBatchIndex = currentState.dailyBatchIndex
+        val finalTray = if (nextTrayCandidate.all { it == null }) {
+            if (currentState.gameMode == GameMode.DAILY_CHALLENGE) {
+                nextBatchIndex++
+                ShapeDefinitions.getDailyShapeBatch(computeDailySeed(), nextBatchIndex, currentScore = currentState.score)
+            } else {
+                ShapeDefinitions.getRandomShapeBatch(currentScore = currentState.score)
+            }
+        } else {
+            nextTrayCandidate.toList()
+        }
+
+        val nextGameOver = checkGameOver(currentState.grid, finalTray)
+        soundManager.playPickup()
+        triggerHaptic(HapticEffect.Pickup)
+
+        _gameState.update {
+            it.copy(
+                activePieces = finalTray,
+                heldPiece = nextHeld,
+                canHoldThisTurn = false,
+                dailyBatchIndex = nextBatchIndex,
+                selectedShapeIndex = null,
+                isHammerActive = false,
+                isBombActive = false,
+                isRotateActive = false,
+                activeHint = null,
+                hoverRow = null,
+                hoverCol = null,
+                hoverPreviewCells = emptySet(),
+                prospectiveRows = emptySet(),
+                prospectiveCols = emptySet(),
+                isGameOver = nextGameOver,
+                comboBannerText = bannerText,
+                canUndo = true
+            )
+        }
+
+        flushSession(syncToCloud = true)
+        viewModelScope.launch {
+            delay(1200)
+            _gameState.update {
+                if (it.comboBannerText == bannerText) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    /**
+     * Spins the Daily Lucky Wheel using today's free daily spin or an ad-earned bonus spin.
+     */
+    fun spinLuckyWheel(forcedSliceIndex: Int? = null): LuckySpinResult? {
+        val today = getTodayDateString()
+        val hasFree = preferences.canClaimFreeSpinToday(today)
+        val currentBonus = preferences.bonusSpinCount
+        if (!hasFree && currentBonus <= 0) {
+            return null
+        }
+
+        if (hasFree) {
+            preferences.lastLuckySpinDate = today
+        } else {
+            preferences.bonusSpinCount = (currentBonus - 1).coerceAtLeast(0)
+        }
+
+        val slice = if (forcedSliceIndex != null) {
+            LuckySpinCatalog.sliceByIndex(forcedSliceIndex)
+        } else {
+            LuckySpinCatalog.spinRandom()
+        }
+
+        when (slice.rewardType) {
+            SpinRewardType.COINS -> {
+                preferences.coinsBalance = preferences.coinsBalance + slice.amount
+                preferences.totalCoinsEarned = preferences.totalCoinsEarned + slice.amount
+            }
+            SpinRewardType.HAMMER -> {
+                preferences.hammerCount = preferences.hammerCount + slice.amount
+            }
+            SpinRewardType.ROTATE -> {
+                preferences.rotateCount = preferences.rotateCount + slice.amount
+            }
+            SpinRewardType.SHUFFLE -> {
+                preferences.shuffleCount = preferences.shuffleCount + slice.amount
+            }
+            SpinRewardType.BOMB -> {
+                preferences.bombCount = preferences.bombCount + slice.amount
+            }
+        }
+
+        val result = LuckySpinResult(slice = slice, usedFreeDailySpin = hasFree)
+        soundManager.playComboCheer()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val spinBanner = "🎡 LUCKY SPIN: ${slice.emoji} ${slice.label}!"
+        _gameState.update {
+            it.copy(
+                coinsBalance = preferences.coinsBalance,
+                hammerCount = preferences.hammerCount,
+                rotateCount = preferences.rotateCount,
+                shuffleCount = preferences.shuffleCount,
+                bombCount = preferences.bombCount,
+                canClaimFreeLuckySpin = preferences.canClaimFreeSpinToday(today),
+                bonusSpinCount = preferences.bonusSpinCount,
+                lastSpinReward = result,
+                comboBannerText = spinBanner
+            )
+        }
+
+        flushSession(syncToCloud = true)
+        viewModelScope.launch {
+            delay(1800)
+            _gameState.update {
+                if (it.comboBannerText == spinBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return result
+    }
+
+    fun grantBonusSpinAfterAd() {
+        val nextSpins = preferences.bonusSpinCount + 1
+        preferences.bonusSpinCount = nextSpins
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val earnedBanner = "🎡 +1 BONUS LUCKY SPIN EARNED!"
+        _gameState.update {
+            it.copy(
+                bonusSpinCount = nextSpins,
+                comboBannerText = earnedBanner
+            )
+        }
+        viewModelScope.launch {
+            delay(1600)
+            _gameState.update {
+                if (it.comboBannerText == earnedBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+    }
+
+    fun clearLastSpinReward() {
+        _gameState.update { it.copy(lastSpinReward = null) }
     }
 
     fun showTemporaryBanner(message: String) {

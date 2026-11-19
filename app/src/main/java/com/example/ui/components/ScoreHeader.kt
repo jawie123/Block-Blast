@@ -98,6 +98,9 @@ fun ScoreHeader(
     adventureGemsCollected: Int = 0,
     adventureIceBroken: Int = 0,
     adventureInitialIceTotal: Int = 0,
+    canClaimFreeLuckySpin: Boolean = false,
+    bonusSpinCount: Int = 0,
+    onOpenLuckySpin: () -> Unit = {},
     onOpenAdventureMap: () -> Unit = {},
     onToggleSound: () -> Unit = {},
     onToggleHaptics: () -> Unit = {},
@@ -897,16 +900,16 @@ fun ScoreHeader(
 
         Spacer(modifier = Modifier.height(3.dp))
 
-        // Row B: Equal-width Quick Strip for Coin Shop, Daily Login Gift, and Daily Missions
+        // Row B: Quick Strip for Coin Shop, Daily Gift, Lucky Spin Wheel, and Daily Missions
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Coins Wallet / Shop Pill
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(1.12f)
                     .height(26.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
@@ -916,13 +919,13 @@ fun ScoreHeader(
                     )
                     .border(1.dp, GoldAccent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
                     .clickable { onOpenShop() }
-                    .padding(horizontal = 6.dp)
+                    .padding(horizontal = 4.dp)
                     .testTag("header_shop_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "🪙 $coinsBalance • SHOP",
-                    fontSize = 9.sp,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.Black,
                     color = GoldAccent,
                     maxLines = 1,
@@ -933,7 +936,7 @@ fun ScoreHeader(
             // Daily Login Rewards Button
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.95f)
                     .height(26.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
@@ -951,27 +954,76 @@ fun ScoreHeader(
                         shape = RoundedCornerShape(8.dp)
                     )
                     .clickable { onShowDailyRewards() }
-                    .padding(horizontal = 6.dp)
+                    .padding(horizontal = 4.dp)
                     .testTag("daily_login_reward_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = "🎁",
-                        fontSize = 11.sp
+                        fontSize = 10.sp
                     )
                     Text(
                         text = when {
-                            canClaimDailyReward -> "CLAIM GIFT"
-                            loginStreak > 0 -> "DAY ${loginStreak}"
-                            else -> "DAILY GIFT"
+                            canClaimDailyReward -> "CLAIM"
+                            loginStreak > 0 -> "DAY $loginStreak"
+                            else -> "GIFT"
                         },
-                        fontSize = 9.sp,
+                        fontSize = 8.5.sp,
                         fontWeight = FontWeight.Black,
                         color = if (canClaimDailyReward) GoldAccent else Color(0xFFFFE082),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            // Daily Lucky Spin Wheel Button
+            val hasSpinAvailable = canClaimFreeLuckySpin || bonusSpinCount > 0
+            Box(
+                modifier = Modifier
+                    .weight(0.92f)
+                    .height(26.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            if (hasSpinAvailable) {
+                                listOf(Color(0xFF32113A), Color(0xFF1D1838))
+                            } else {
+                                listOf(Color(0xFF1E2235), Color(0xFF161928))
+                            }
+                        )
+                    )
+                    .border(
+                        width = if (hasSpinAvailable) 1.5.dp else 1.dp,
+                        color = if (hasSpinAvailable) Color(0xFFE040FB) else theme.boardBorder,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onOpenLuckySpin() }
+                    .padding(horizontal = 4.dp)
+                    .testTag("lucky_spin_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "🎡",
+                        fontSize = 10.sp
+                    )
+                    Text(
+                        text = when {
+                            canClaimFreeLuckySpin -> "FREE!"
+                            bonusSpinCount > 0 -> "SPIN×$bonusSpinCount"
+                            else -> "SPIN"
+                        },
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (hasSpinAvailable) Color(0xFFF48FB1) else Color(0xFFD1C4E9),
                         maxLines = 1,
                         softWrap = false
                     )
@@ -981,7 +1033,7 @@ fun ScoreHeader(
             // Daily Missions Button
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.95f)
                     .height(26.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
@@ -995,21 +1047,21 @@ fun ScoreHeader(
                         shape = RoundedCornerShape(8.dp)
                     )
                     .clickable { onShowMissions() }
-                    .padding(horizontal = 6.dp)
+                    .padding(horizontal = 4.dp)
                     .testTag("daily_missions_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Text(
                         text = "🎯",
-                        fontSize = 11.sp
+                        fontSize = 10.sp
                     )
                     Text(
                         text = "GOALS",
-                        fontSize = 9.sp,
+                        fontSize = 8.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                         maxLines = 1,

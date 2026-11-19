@@ -39,6 +39,7 @@ fun BlockCell(
     isHammerTarget: Boolean = false,
     isBombTarget: Boolean = false,
     isGem: Boolean = false,
+    isLightning: Boolean = false,
     iceLayers: Int = 0,
     theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     emptyTileTint: Color? = null,
@@ -98,10 +99,11 @@ fun BlockCell(
                 isProspectiveClear -> Color.White.copy(alpha = resolvedPulse)
                 iceLayers >= 2 -> Color(0xFFE1F5FE)
                 iceLayers == 1 -> Color(0xFF81D4FA)
+                isLightning -> Color(0xFFFFEA00)
                 isGem -> Color(0xFFFFD700)
                 else -> palette.light
             }
-            val borderWidth = if (isHammerTarget || isBombTarget || iceLayers >= 2 || isGem) 1.8.dp else 1.dp
+            val borderWidth = if (isHammerTarget || isBombTarget || iceLayers >= 2 || isGem || isLightning) 1.8.dp else 1.dp
             val isWood = theme.isWoodStyle
 
             Box(
@@ -174,6 +176,7 @@ fun BlockCell(
                     .testTag(
                         when {
                             iceLayers > 0 -> "block_cell_ice_$iceLayers"
+                            isLightning -> "block_cell_lightning"
                             isGem -> "block_cell_gem"
                             else -> "block_cell_filled"
                         }
@@ -183,6 +186,11 @@ fun BlockCell(
                 if (iceLayers > 0) {
                     androidx.compose.material3.Text(
                         text = if (iceLayers >= 2) "❄️" else "🧊",
+                        fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
+                    )
+                } else if (isLightning) {
+                    androidx.compose.material3.Text(
+                        text = "⚡",
                         fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
                     )
                 } else if (isGem) {

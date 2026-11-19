@@ -53,7 +53,10 @@ data class SavedGameSessionData(
     val adventureGemsCollected: Int = 0,
     val adventureIceBroken: Int = 0,
     val gemCells: Set<Pair<Int, Int>> = emptySet(),
-    val iceCells: Map<Pair<Int, Int>, Int> = emptyMap()
+    val iceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
+    val heldPiece: BlockShape? = null,
+    val canHoldThisTurn: Boolean = true,
+    val lightningCells: Set<Pair<Int, Int>> = emptySet()
 )
 
 @IgnoreExtraProperties

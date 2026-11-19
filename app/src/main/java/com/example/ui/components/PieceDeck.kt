@@ -3,6 +3,7 @@ package com.example.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -232,7 +236,7 @@ fun PieceSlot(
 }
 
 /**
- * PieceDeck composable holding the 3 PieceSlot containers.
+ * PieceDeck composable holding the Hold Piece Pocket and 3 PieceSlot containers.
  */
 @Composable
 fun PieceDeck(
@@ -244,6 +248,9 @@ fun PieceDeck(
     onDragStart: (index: Int, touchPosRoot: Offset) -> Unit,
     onDragMove: (delta: Offset) -> Unit,
     onDragEnd: () -> Unit,
+    heldPiece: BlockShape? = null,
+    canHoldPiece: Boolean = true,
+    onHoldSlotClick: () -> Unit = {},
     isRotateMode: Boolean = false,
     compactMode: Boolean = false,
     theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
@@ -254,9 +261,19 @@ fun PieceDeck(
             .fillMaxWidth()
             .height(if (compactMode) 68.dp else 90.dp)
             .padding(horizontal = 12.dp, vertical = if (compactMode) 2.dp else 3.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        HoldPieceSlot(
+            heldPiece = heldPiece,
+            canHold = canHoldPiece,
+            hasSelection = selectedShapeIndex != null,
+            compactMode = compactMode,
+            theme = theme,
+            onClick = onHoldSlotClick,
+            modifier = Modifier.weight(0.76f)
+        )
+
         for (i in 0 until 3) {
             PieceSlot(
                 index = i,
@@ -274,6 +291,104 @@ fun PieceDeck(
                 modifier = Modifier.weight(1f)
             )
         }
+    }
+}
+
+@Composable
+fun HoldPieceSlot(
+    heldPiece: BlockShape?,
+    canHold: Boolean,
+    hasSelection: Boolean,
+    compactMode: Boolean,
+    theme: BoardThemeSpec,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accent = when {
+        !canHold -> Color(0xFF5D6A85)
+        heldPiece != null || hasSelection -> Color(0xFF00E5FF)
+        else -> Color(0xFF7C4DFF)
+    }
+
+    Box(
+        modifier = modifier
+            .testTag("hold_piece_slot")
+            .height(if (compactMode) 62.dp else 84.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (canHold) theme.boardBackground else theme.boardBackground.copy(alpha = 0.65f)
+            )
+            .border(
+                width = if (canHold && (heldPiece != null || hasSelection)) 1.6.dp else 1.dp,
+                color = accent.copy(alpha = if (canHold) 0.8f else 0.4f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable(role = Role.Button) { onClick() }
+            .semantics {
+                contentDescription = if (heldPiece != null) {
+                    "Hold pocket occupied, tap to swap or recall"
+                } else {
+                    "Hold pocket empty, tap to store a piece"
+                }
+            }
+            .padding(vertical = 4.dp, horizontal = 3.dp)
+    ) {
+        Text(
+            text = "HOLD",
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Black,
+            color = accent,
+            letterSpacing = 0.5.sp,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 11.dp, bottom = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (heldPiece != null) {
+                val maxDim = maxOf(heldPiece.width, heldPiece.height)
+                val unitDp = when {
+                    maxDim >= 5 -> if (compactMode) 6.dp else 8.dp
+                    maxDim == 4 -> if (compactMode) 7.dp else 9.dp
+                    else -> if (compactMode) 8.dp else 10.dp
+                }
+                Box(modifier = Modifier.alpha(if (canHold) 1f else 0.6f)) {
+                    ShapeRenderer(
+                        shape = heldPiece,
+                        cellUnitDp = unitDp,
+                        theme = theme
+                    )
+                }
+            } else {
+                Text(
+                    text = if (hasSelection) "STORE" else "📦",
+                    fontSize = if (hasSelection) 9.sp else 16.sp,
+                    fontWeight = FontWeight.Black,
+                    color = accent.copy(alpha = 0.85f),
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+
+        Text(
+            text = when {
+                !canHold -> "WAIT"
+                heldPiece != null -> "SWAP"
+                else -> "TAP"
+            },
+            fontSize = 7.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = accent.copy(alpha = 0.85f),
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 

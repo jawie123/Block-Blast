@@ -262,6 +262,19 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_TOTAL_LOGIN_HAMMERS_EARNED, 0)
         set(value) = prefs.edit().putInt(KEY_TOTAL_LOGIN_HAMMERS_EARNED, value.coerceAtLeast(0)).apply()
 
+    var lastLuckySpinDate: String
+        get() = prefs.getString(KEY_LAST_LUCKY_SPIN_DATE, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LAST_LUCKY_SPIN_DATE, value).apply()
+
+    var bonusSpinCount: Int
+        get() = prefs.getInt(KEY_BONUS_SPIN_COUNT, 0).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_BONUS_SPIN_COUNT, value.coerceAtLeast(0)).apply()
+
+    fun canClaimFreeSpinToday(todayDate: String): Boolean {
+        if (todayDate.isBlank()) return false
+        return lastLuckySpinDate != todayDate
+    }
+
     companion object {
         private const val KEY_HIGH_SCORE = "key_high_score"
         private const val KEY_HIGHEST_COMBO = "key_highest_combo"
@@ -294,5 +307,7 @@ class GamePreferences(context: Context) {
         private const val KEY_TOTAL_LOGIN_DAYS_CLAIMED = "key_total_login_days_claimed"
         private const val KEY_TOTAL_COINS_EARNED = "key_total_coins_earned"
         private const val KEY_TOTAL_LOGIN_HAMMERS_EARNED = "key_total_login_hammers_earned"
+        private const val KEY_LAST_LUCKY_SPIN_DATE = "key_last_lucky_spin_date"
+        private const val KEY_BONUS_SPIN_COUNT = "key_bonus_spin_count"
     }
 }

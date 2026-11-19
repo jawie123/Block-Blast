@@ -10,7 +10,8 @@ enum class RewardedAdRewardType {
     FREE_HAMMER,
     FREE_SHUFFLE,
     FREE_BOMB,
-    FREE_ROTATE
+    FREE_ROTATE,
+    LUCKY_SPIN
 }
 
 data class AdUiState(

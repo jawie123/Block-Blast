@@ -261,6 +261,7 @@ fun GridBoard(
                             val isHammerTarget = gameState.isHammerActive && colorId > 0
                             val isBombTarget = gameState.isBombActive && colorId > 0
                             val isGem = colorId > 0 && gameState.gemCells.isNotEmpty() && (r to c) in gameState.gemCells
+                            val isLightning = colorId > 0 && gameState.lightningCells.isNotEmpty() && (r to c) in gameState.lightningCells
                             val iceLayers = if (colorId > 0 && gameState.iceCells.isNotEmpty()) {
                                 gameState.iceCells[r to c] ?: 0
                             } else {
@@ -287,6 +288,7 @@ fun GridBoard(
                                     isHammerTarget = isHammerTarget,
                                     isBombTarget = isBombTarget,
                                     isGem = isGem,
+                                    isLightning = isLightning,
                                     iceLayers = iceLayers,
                                     theme = theme,
                                     emptyTileTint = stableEmptyTint,
