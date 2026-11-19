@@ -38,6 +38,8 @@ fun BlockCell(
     isProspectiveClear: Boolean = false,
     isHammerTarget: Boolean = false,
     isBombTarget: Boolean = false,
+    isGem: Boolean = false,
+    iceLayers: Int = 0,
     theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     emptyTileTint: Color? = null,
     cornerRadius: Dp = 6.dp,
@@ -87,16 +89,19 @@ fun BlockCell(
             )
         }
 
-        // Filled jewel or wood block
+        // Filled jewel, gem, ice, or wood block
         colorId > 0 -> {
             val palette = theme.paletteFor(colorId)
             val borderHighlight = when {
                 isBombTarget -> Color(0xFFFF5722).copy(alpha = resolvedPulse)
                 isHammerTarget -> Color(0xFFFFB300).copy(alpha = resolvedPulse)
                 isProspectiveClear -> Color.White.copy(alpha = resolvedPulse)
+                iceLayers >= 2 -> Color(0xFFE1F5FE)
+                iceLayers == 1 -> Color(0xFF81D4FA)
+                isGem -> Color(0xFFFFD700)
                 else -> palette.light
             }
-            val borderWidth = if (isHammerTarget || isBombTarget) 2.dp else 1.dp
+            val borderWidth = if (isHammerTarget || isBombTarget || iceLayers >= 2 || isGem) 1.8.dp else 1.dp
             val isWood = theme.isWoodStyle
 
             Box(
@@ -112,6 +117,16 @@ fun BlockCell(
                                 colors = listOf(Color.White.copy(alpha = 0.45f), Color.Transparent),
                                 center = Offset(size.width * 0.25f, size.height * 0.25f),
                                 radius = (size.width * 0.55f).coerceAtLeast(1f)
+                            )
+                        } else {
+                            null
+                        }
+                        val iceSheenBrush = if (iceLayers > 0) {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFE1F5FE).copy(alpha = if (iceLayers >= 2) 0.62f else 0.36f),
+                                    Color(0xFF4FC3F7).copy(alpha = if (iceLayers >= 2) 0.45f else 0.22f)
+                                )
                             )
                         } else {
                             null
@@ -134,12 +149,49 @@ fun BlockCell(
                             } else if (glossBrush != null) {
                                 drawCircle(brush = glossBrush)
                             }
+                            if (iceSheenBrush != null) {
+                                drawRect(brush = iceSheenBrush)
+                                if (iceLayers == 1) {
+                                    // Visible frost crack diagonal for 1-hit remaining ice
+                                    drawLine(
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        start = Offset(size.width * 0.18f, size.height * 0.2f),
+                                        end = Offset(size.width * 0.55f, size.height * 0.55f),
+                                        strokeWidth = 2f
+                                    )
+                                    drawLine(
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        start = Offset(size.width * 0.55f, size.height * 0.55f),
+                                        end = Offset(size.width * 0.82f, size.height * 0.38f),
+                                        strokeWidth = 1.8f
+                                    )
+                                }
+                            }
                         }
                     }
                     .border(borderWidth, borderHighlight, shape)
                     .fillMaxSize()
-                    .testTag("block_cell_filled")
-            )
+                    .testTag(
+                        when {
+                            iceLayers > 0 -> "block_cell_ice_$iceLayers"
+                            isGem -> "block_cell_gem"
+                            else -> "block_cell_filled"
+                        }
+                    ),
+                contentAlignment = androidx.compose.ui.Alignment.Center
+            ) {
+                if (iceLayers > 0) {
+                    androidx.compose.material3.Text(
+                        text = if (iceLayers >= 2) "❄️" else "🧊",
+                        fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
+                    )
+                } else if (isGem) {
+                    androidx.compose.material3.Text(
+                        text = "💎",
+                        fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
+                    )
+                }
+            }
         }
 
         // Empty tile cell on 8x8 grid

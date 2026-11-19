@@ -1,6 +1,8 @@
 package com.example.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
@@ -52,6 +54,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -73,12 +76,15 @@ import com.example.ads.RewardedAdRewardType
 import com.example.ads.findActivity
 import com.example.audio.AppHaptics
 import com.example.audio.HapticEffect
+import com.example.model.AdventureCatalog
 import com.example.model.BlockShape
 import com.example.model.BoardThemeCatalog
 import com.example.model.BoardThemeSpec
 import com.example.model.DailyLoginRewardSchedule
 import com.example.model.GameMode
 import com.example.model.ShopBoosterType
+import com.example.ui.components.AdventureLevelCompleteDialog
+import com.example.ui.components.AdventureLevelsDialog
 import com.example.ui.components.BoosterBar
 import com.example.ui.components.ComboMultiplierHud
 import com.example.ui.components.DailyLeaderboardDialog
@@ -125,6 +131,7 @@ fun GameScreen(
     var showLeaderboardDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showShopDialog by remember { mutableStateOf(false) }
+    var showAdventureMapDialog by remember { mutableStateOf(false) }
     var shopInitialTab by remember { mutableStateOf(ShopTab.THEMES) }
     var freeBoosterPromptType by remember { mutableStateOf<RewardedAdRewardType?>(null) }
     var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.HIGH_SCORES) }
@@ -169,8 +176,10 @@ fun GameScreen(
         showLeaderboardDialog,
         showSettingsDialog,
         showShopDialog,
+        showAdventureMapDialog,
         freeBoosterPromptType,
         gameState.isGameOver,
+        gameState.adventureLevelCompleted,
         gameState.gameMode
     ) {
         val shouldPause = isLifecyclePaused ||
@@ -182,8 +191,10 @@ fun GameScreen(
             showLeaderboardDialog ||
             showSettingsDialog ||
             showShopDialog ||
+            showAdventureMapDialog ||
             freeBoosterPromptType != null ||
-            gameState.isGameOver
+            gameState.isGameOver ||
+            gameState.adventureLevelCompleted
         viewModel.setTimeAttackPaused(shouldPause)
     }
 
@@ -200,6 +211,7 @@ fun GameScreen(
                         RewardedAdRewardType.FREE_HAMMER -> viewModel.grantFreeHammerAfterAd()
                         RewardedAdRewardType.FREE_SHUFFLE -> viewModel.grantFreeShuffleAfterAd()
                         RewardedAdRewardType.FREE_BOMB -> viewModel.grantFreeBombAfterAd()
+                        RewardedAdRewardType.FREE_ROTATE -> viewModel.grantFreeRotateAfterAd()
                     }
                 },
                 onAdClosedOrFailed = { errorMsg ->
@@ -364,6 +376,11 @@ fun GameScreen(
                 timeRemainingMs = gameState.timeRemainingMs,
                 timeMaxMs = gameState.timeMaxMs,
                 lastTimeBonusSeconds = gameState.lastTimeBonusSeconds,
+                adventureLevelNumber = gameState.adventureLevelNumber,
+                adventureGemsCollected = gameState.adventureGemsCollected,
+                adventureIceBroken = gameState.adventureIceBroken,
+                adventureInitialIceTotal = gameState.adventureInitialIceTotal,
+                onOpenAdventureMap = { showAdventureMapDialog = true },
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
                 onShowSettings = { showSettingsDialog = true },
@@ -418,9 +435,20 @@ fun GameScreen(
                 contentAlignment = Alignment.Center
             ) {
                 val boardSizeDp = minOf(maxWidth, maxHeight).coerceIn(0.dp, 460.dp)
+                val shakeOffsetPx = remember { Animatable(0f) }
+                LaunchedEffect(gameState.shakeEventId) {
+                    if (gameState.shakeEventId > 0L) {
+                        val pattern = listOf(-12f, 12f, -7f, 7f, -3f, 0f)
+                        for (target in pattern) {
+                            shakeOffsetPx.animateTo(target, tween(durationMillis = 30))
+                        }
+                    }
+                }
 
                 Box(
-                    modifier = Modifier.size(boardSizeDp),
+                    modifier = Modifier
+                        .size(boardSizeDp)
+                        .graphicsLayer { translationX = shakeOffsetPx.value },
                     contentAlignment = Alignment.Center
                 ) {
                     GridBoard(
@@ -513,7 +541,35 @@ fun GameScreen(
                 }
 
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = gameState.selectedShapeIndex != null && !gameState.isHammerActive && !gameState.isBombActive,
+                    visible = gameState.isRotateActive,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFFAB47BC), Color(0xFF00E5FF))))
+                            .clickable { viewModel.toggleRotateMode() }
+                            .padding(horizontal = 10.dp, vertical = 2.dp)
+                            .testTag("rotate_active_instruction_pill")
+                    ) {
+                        Text(
+                            text = "↻ TAP ANY TRAY PIECE TO ROTATE 90° (TAP TO CANCEL)",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = gameState.selectedShapeIndex != null &&
+                        !gameState.isHammerActive &&
+                        !gameState.isBombActive &&
+                        !gameState.isRotateActive,
                     enter = fadeIn(),
                     exit = fadeOut(),
                     modifier = Modifier
@@ -537,7 +593,7 @@ fun GameScreen(
                 }
             }
 
-            // 3. Dedicated Booster Dock (Hammer, Hint, Shuffle, 3x3 Bomb, Shop)
+            // 3. Dedicated Booster Dock (Hammer, Hint, Rotate, Shuffle, 3x3 Bomb, Shop)
             BoosterBar(
                 hammerCount = gameState.hammerCount,
                 isHammerActive = gameState.isHammerActive,
@@ -577,6 +633,15 @@ fun GameScreen(
                     shopInitialTab = ShopTab.THEMES
                     showShopDialog = true
                 },
+                rotateCount = gameState.rotateCount,
+                isRotateActive = gameState.isRotateActive,
+                onRotate = {
+                    if (gameState.rotateCount <= 0 && !gameState.isRotateActive && adCoordinator != null) {
+                        freeBoosterPromptType = RewardedAdRewardType.FREE_ROTATE
+                    } else {
+                        viewModel.toggleRotateMode()
+                    }
+                },
                 compactMode = isCompactHeight,
                 theme = activeTheme
             )
@@ -587,7 +652,13 @@ fun GameScreen(
                 canFitList = canFitList,
                 selectedShapeIndex = gameState.selectedShapeIndex,
                 draggingPieceIndex = draggingIndex,
-                onSelectPiece = { idx -> viewModel.selectPieceForTap(idx) },
+                onSelectPiece = { idx ->
+                    if (gameState.isRotateActive && idx != null) {
+                        viewModel.useRotateOnPiece(idx)
+                    } else {
+                        viewModel.selectPieceForTap(idx)
+                    }
+                },
                 onDragStart = { idx, initialTouchPos ->
                     val shape = viewModel.gameState.value.activePieces.getOrNull(idx)
                     if (shape != null && viewModel.canFitAnywhere(viewModel.gameState.value.grid, shape)) {
@@ -621,6 +692,7 @@ fun GameScreen(
                     }
                     draggingIndex = null
                 },
+                isRotateMode = gameState.isRotateActive,
                 compactMode = isCompactHeight,
                 theme = activeTheme
             )
@@ -758,7 +830,7 @@ fun GameScreen(
             )
         }
 
-        // Settings Menu Dialog (Background Music, Sound Effects, Haptics & Privacy)
+        // Settings Menu Dialog (Background Music, Sound Effects, Haptics, Board Themes & Privacy)
         if (showSettingsDialog) {
             SettingsDialog(
                 isMusicEnabled = gameState.isMusicEnabled,
@@ -766,6 +838,14 @@ fun GameScreen(
                 isHapticsEnabled = gameState.isHapticsEnabled,
                 isPrivacyOptionsRequired = adState.isPrivacyOptionsRequired,
                 achievements = gameState.achievements,
+                selectedThemeId = gameState.selectedThemeId,
+                unlockedThemeIds = gameState.unlockedThemeIds,
+                onSelectTheme = { themeId -> viewModel.selectOrUnlockTheme(themeId) },
+                onOpenThemeShop = {
+                    showSettingsDialog = false
+                    shopInitialTab = ShopTab.THEMES
+                    showShopDialog = true
+                },
                 onToggleMusic = { viewModel.toggleMusic() },
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
@@ -815,6 +895,7 @@ fun GameScreen(
                 hintCount = gameState.hintCount,
                 shuffleCount = gameState.shuffleCount,
                 bombCount = gameState.bombCount,
+                rotateCount = gameState.rotateCount,
                 isRewardedAdReady = adState.isRewardedAdReady,
                 isRewardedAdLoading = adState.isRewardedAdLoading,
                 isAdShowing = adState.isAdShowing,
@@ -826,11 +907,41 @@ fun GameScreen(
                         ShopBoosterType.HAMMER -> launchRewardedAd(RewardedAdRewardType.FREE_HAMMER)
                         ShopBoosterType.SHUFFLE -> launchRewardedAd(RewardedAdRewardType.FREE_SHUFFLE)
                         ShopBoosterType.BOMB -> launchRewardedAd(RewardedAdRewardType.FREE_BOMB)
+                        ShopBoosterType.ROTATE -> launchRewardedAd(RewardedAdRewardType.FREE_ROTATE)
                         ShopBoosterType.HINT -> Unit
                     }
                 } else null,
                 onDismiss = { showShopDialog = false },
                 initialTab = shopInitialTab
+            )
+        }
+
+        // Adventure Level Map Selector Dialog
+        if (showAdventureMapDialog) {
+            AdventureLevelsDialog(
+                currentLevelNumber = gameState.adventureLevelNumber,
+                maxUnlockedLevel = gameState.adventureMaxUnlockedLevel,
+                getLevelStars = { lvl -> viewModel.getAdventureLevelStars(lvl) },
+                onSelectLevel = { lvl ->
+                    showAdventureMapDialog = false
+                    viewModel.startAdventureLevel(lvl)
+                },
+                onDismiss = { showAdventureMapDialog = false }
+            )
+        }
+
+        // Adventure Stage Complete Celebration Dialog
+        if (gameState.adventureLevelCompleted) {
+            val completedSpec = AdventureCatalog.level(gameState.adventureLevelNumber)
+            AdventureLevelCompleteDialog(
+                levelSpec = completedSpec,
+                score = gameState.score,
+                earnedStars = gameState.adventureEarnedStars,
+                rewardCoins = gameState.adventureLastRewardCoins,
+                hasNextLevel = completedSpec.levelNumber < AdventureCatalog.totalLevels,
+                onNextLevel = { viewModel.advanceToNextAdventureLevel() },
+                onOpenMap = { showAdventureMapDialog = true },
+                onReplay = { viewModel.startAdventureLevel(completedSpec.levelNumber) }
             )
         }
 
@@ -867,25 +978,30 @@ private fun FreeBoosterAdPromptDialog(
 ) {
     val isHammer = rewardType == RewardedAdRewardType.FREE_HAMMER
     val isShuffle = rewardType == RewardedAdRewardType.FREE_SHUFFLE
+    val isRotate = rewardType == RewardedAdRewardType.FREE_ROTATE
     val emoji = when {
         isHammer -> "🔨"
         isShuffle -> "🔄"
+        isRotate -> "↻"
         else -> "💣"
     }
     val title = when {
         isHammer -> "OUT OF HAMMERS!"
         isShuffle -> "OUT OF SHUFFLES!"
+        isRotate -> "OUT OF ROTATES!"
         else -> "OUT OF BOMBS!"
     }
     val body = when {
         isHammer -> "Watch a short video ad to earn +1 Free Hammer instantly, or craft one with Coins in the Shop."
         isShuffle -> "Watch a short video ad to earn +1 Free Shuffle instantly, or buy one with Coins in the Shop."
+        isRotate -> "Watch a short video ad to earn +1 Free Piece Rotate instantly, or buy one with Coins in the Shop."
         else -> "Watch a short video ad to earn +1 Free 3×3 Bomb instantly, or buy one with Coins in the Shop."
     }
     val watchCta = when {
         !isRewardedAdReady && isRewardedAdLoading -> "LOADING AD..."
         isHammer -> "WATCH AD • +1 HAMMER"
         isShuffle -> "WATCH AD • +1 SHUFFLE"
+        isRotate -> "WATCH AD • +1 ROTATE"
         else -> "WATCH AD • +1 BOMB"
     }
 

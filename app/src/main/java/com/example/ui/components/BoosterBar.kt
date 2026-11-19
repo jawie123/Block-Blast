@@ -46,17 +46,20 @@ fun BoosterBar(
     onShuffle: () -> Unit,
     onToggleBomb: () -> Unit,
     onOpenShop: () -> Unit,
+    rotateCount: Int = 3,
+    isRotateActive: Boolean = false,
+    onRotate: () -> Unit = {},
     compactMode: Boolean = false,
     theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
 ) {
-    val barHeight = if (compactMode) 40.dp else 48.dp
+    val barHeight = if (compactMode) 40.dp else 46.dp
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = if (compactMode) 1.dp else 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 1. Hammer
@@ -91,7 +94,23 @@ fun BoosterBar(
             modifier = Modifier.weight(1f)
         )
 
-        // 3. Piece Shuffle
+        // 3. Piece Rotate (90° CW)
+        BoosterPill(
+            emoji = "↻",
+            badgeText = if (isRotateActive) "ON" else "$rotateCount",
+            isActive = isRotateActive,
+            hasInventory = rotateCount > 0,
+            activeGradient = listOf(Color(0xFFE040FB), Color(0xFF00E5FF)),
+            accentColor = Color(0xFFEA80FC),
+            contentDesc = "Piece Rotate Booster, $rotateCount remaining",
+            testTag = "rotate_powerup_button",
+            barHeight = barHeight,
+            theme = theme,
+            onClick = onRotate,
+            modifier = Modifier.weight(1f)
+        )
+
+        // 4. Piece Shuffle
         BoosterPill(
             emoji = "🔄",
             badgeText = "$shuffleCount",
@@ -107,7 +126,7 @@ fun BoosterBar(
             modifier = Modifier.weight(1f)
         )
 
-        // 4. 3x3 Area Bomb
+        // 5. 3x3 Area Bomb
         BoosterPill(
             emoji = "💣",
             badgeText = if (isBombActive) "ON" else "$bombCount",
@@ -123,10 +142,10 @@ fun BoosterBar(
             modifier = Modifier.weight(1f)
         )
 
-        // 5. Coin & Theme Shop
+        // 6. Coin & Theme Shop
         Box(
             modifier = Modifier
-                .weight(1.15f)
+                .weight(1.22f)
                 .height(barHeight)
                 .clip(RoundedCornerShape(11.dp))
                 .background(
@@ -137,21 +156,21 @@ fun BoosterBar(
                 .border(1.2.dp, Color(0xFFFFD700).copy(alpha = 0.72f), RoundedCornerShape(11.dp))
                 .clickable(role = Role.Button, onClick = onOpenShop)
                 .semantics { contentDescription = "Open Theme and Booster Shop, $coinsBalance coins" }
-                .padding(horizontal = 6.dp)
+                .padding(horizontal = 4.dp)
                 .testTag("shop_open_button"),
             contentAlignment = Alignment.Center
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = "🛍️",
-                    fontSize = 13.sp
+                    fontSize = 11.sp
                 )
                 Text(
                     text = "SHOP",
-                    fontSize = 10.sp,
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Black,
                     color = Color(0xFFFFD700),
                     maxLines = 1,

@@ -28,11 +28,14 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Vibration
+import com.example.model.AdventureCatalog
+import com.example.model.AdventureGoalType
 import com.example.model.GameMode
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -91,6 +94,11 @@ fun ScoreHeader(
     timeRemainingMs: Long = 60_000L,
     timeMaxMs: Long = 99_000L,
     lastTimeBonusSeconds: Int = 0,
+    adventureLevelNumber: Int = 1,
+    adventureGemsCollected: Int = 0,
+    adventureIceBroken: Int = 0,
+    adventureInitialIceTotal: Int = 0,
+    onOpenAdventureMap: () -> Unit = {},
     onToggleSound: () -> Unit = {},
     onToggleHaptics: () -> Unit = {},
     onShowSettings: () -> Unit = {},
@@ -308,7 +316,7 @@ fun ScoreHeader(
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // Mode Switcher: Classic vs Time Attack vs Daily Challenge
+        // Mode Switcher: Classic vs Time Attack vs Daily vs Adventure
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -322,7 +330,7 @@ fun ScoreHeader(
             // Classic Tab
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.88f)
                     .height(25.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(
@@ -338,10 +346,10 @@ fun ScoreHeader(
             ) {
                 Text(
                     text = "CLASSIC",
-                    fontSize = 9.sp,
+                    fontSize = 8.sp,
                     fontWeight = if (isClassic) FontWeight.Black else FontWeight.Bold,
                     color = if (isClassic) Color.White else Color(0xFF8E9BB0),
-                    letterSpacing = 0.4.sp,
+                    letterSpacing = 0.2.sp,
                     maxLines = 1,
                     softWrap = false
                 )
@@ -351,7 +359,7 @@ fun ScoreHeader(
             val isTimeAttack = gameMode == GameMode.TIME_ATTACK
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(1.16f)
                     .height(25.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(
@@ -367,20 +375,20 @@ fun ScoreHeader(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Timer,
                         contentDescription = null,
                         tint = if (isTimeAttack) Color.White else Color(0xFFFF5252),
-                        modifier = Modifier.size(10.dp)
+                        modifier = Modifier.size(9.dp)
                     )
                     Text(
                         text = "TIME ATTACK",
-                        fontSize = 9.sp,
+                        fontSize = 8.sp,
                         fontWeight = if (isTimeAttack) FontWeight.Black else FontWeight.Bold,
                         color = if (isTimeAttack) Color.White else Color(0xFF8E9BB0),
-                        letterSpacing = 0.3.sp,
+                        letterSpacing = 0.1.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -391,7 +399,7 @@ fun ScoreHeader(
             val isDaily = gameMode == GameMode.DAILY_CHALLENGE
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.84f)
                     .height(25.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(
@@ -407,20 +415,60 @@ fun ScoreHeader(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
                         contentDescription = null,
                         tint = if (isDaily) Color(0xFF0F111E) else Color(0xFFFF9800),
-                        modifier = Modifier.size(10.dp)
+                        modifier = Modifier.size(9.dp)
                     )
                     Text(
                         text = "DAILY",
-                        fontSize = 9.sp,
+                        fontSize = 8.sp,
                         fontWeight = if (isDaily) FontWeight.Black else FontWeight.Bold,
                         color = if (isDaily) Color(0xFF0F111E) else Color(0xFF8E9BB0),
-                        letterSpacing = 0.4.sp,
+                        letterSpacing = 0.2.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            // Adventure Mode Tab
+            val isAdventure = gameMode == GameMode.ADVENTURE
+            Box(
+                modifier = Modifier
+                    .weight(1.12f)
+                    .height(25.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(
+                        if (isAdventure) {
+                            Brush.horizontalGradient(listOf(Color(0xFF00E676), Color(0xFF00B0FF)))
+                        } else {
+                            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                        }
+                    )
+                    .clickable { onSwitchMode(GameMode.ADVENTURE) }
+                    .testTag("mode_tab_adventure"),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Explore,
+                        contentDescription = null,
+                        tint = if (isAdventure) Color(0xFF0F111E) else Color(0xFF00E676),
+                        modifier = Modifier.size(9.dp)
+                    )
+                    Text(
+                        text = "ADVENTURE",
+                        fontSize = 8.sp,
+                        fontWeight = if (isAdventure) FontWeight.Black else FontWeight.Bold,
+                        color = if (isAdventure) Color(0xFF0F111E) else Color(0xFF8E9BB0),
+                        letterSpacing = 0.1.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -629,6 +677,111 @@ fun ScoreHeader(
             }
         }
 
+        // Adventure Level Progress & Map Banner
+        if (gameMode == GameMode.ADVENTURE) {
+            Spacer(modifier = Modifier.height(3.dp))
+            val spec = AdventureCatalog.level(adventureLevelNumber)
+            val (goalLabel, progressFraction) = when (spec.goalType) {
+                AdventureGoalType.COLLECT_GEMS -> {
+                    "💎 $adventureGemsCollected/${spec.targetCount}" to
+                        (adventureGemsCollected.toFloat() / spec.targetCount.coerceAtLeast(1))
+                }
+                AdventureGoalType.BREAK_ICE -> {
+                    val total = adventureInitialIceTotal.coerceAtLeast(spec.targetCount)
+                    "❄️ $adventureIceBroken/$total" to
+                        (adventureIceBroken.toFloat() / total.coerceAtLeast(1))
+                }
+                AdventureGoalType.SCORE_TARGET -> {
+                    "🎯 $score/${spec.targetCount}" to
+                        (score.toFloat() / spec.targetCount.coerceAtLeast(1))
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("adventure_level_banner")
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF0C2622), Color(0xFF121D36))
+                        )
+                    )
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(listOf(Color(0xFF00E676), Color(0xFF00B0FF))),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "LV ${spec.levelNumber} • ${spec.title}",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF00E676),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .width(46.dp)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFF1A2138))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(progressFraction.coerceIn(0.05f, 1f))
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(Color(0xFF00E676), Color(0xFF00E5FF))
+                                    )
+                                )
+                        )
+                    }
+
+                    Text(
+                        text = goalLabel,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.testTag("adventure_goal_text")
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .testTag("adventure_map_button")
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color(0x2600E5FF))
+                            .border(0.8.dp, Color(0xFF00E5FF).copy(alpha = 0.7f), RoundedCornerShape(5.dp))
+                            .clickable(role = Role.Button) { onOpenAdventureMap() }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "MAP ▾",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF00E5FF),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(2.dp))
 
         // Row A: Clean Scores Banner (Current Score on left, Combo + Best High Score on right)
@@ -718,6 +871,7 @@ fun ScoreHeader(
                                 text = when (gameMode) {
                                     GameMode.DAILY_CHALLENGE -> "RECORD"
                                     GameMode.TIME_ATTACK -> "TIME BEST"
+                                    GameMode.ADVENTURE -> "LV $adventureLevelNumber"
                                     else -> "BEST"
                                 },
                                 fontSize = 8.sp,

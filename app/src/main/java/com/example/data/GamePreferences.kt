@@ -86,6 +86,45 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_BOMB_COUNT, 1).coerceAtLeast(0)
         set(value) = prefs.edit().putInt(KEY_BOMB_COUNT, value.coerceAtLeast(0)).apply()
 
+    var rotateCount: Int
+        get() = prefs.getInt(KEY_ROTATE_COUNT, 3).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_ROTATE_COUNT, value.coerceAtLeast(0)).apply()
+
+    var adventureCurrentLevel: Int
+        get() = prefs.getInt(KEY_ADVENTURE_CURRENT_LEVEL, 1).coerceAtLeast(1)
+        set(value) = prefs.edit().putInt(KEY_ADVENTURE_CURRENT_LEVEL, value.coerceAtLeast(1)).apply()
+
+    var adventureMaxUnlockedLevel: Int
+        get() = prefs.getInt(KEY_ADVENTURE_MAX_UNLOCKED_LEVEL, 1).coerceAtLeast(1)
+        set(value) = prefs.edit().putInt(KEY_ADVENTURE_MAX_UNLOCKED_LEVEL, value.coerceAtLeast(1)).apply()
+
+    fun getAdventureLevelStars(level: Int): Int =
+        prefs.getInt("adv_stars_$level", 0).coerceIn(0, 3)
+
+    fun setAdventureLevelStars(level: Int, stars: Int) {
+        val current = getAdventureLevelStars(level)
+        if (stars > current) {
+            prefs.edit().putInt("adv_stars_$level", stars.coerceIn(0, 3)).apply()
+        }
+    }
+
+    fun isAdventureLevelRewardClaimed(level: Int): Boolean =
+        prefs.getBoolean("adv_reward_claimed_$level", false)
+
+    fun markAdventureLevelRewardClaimed(level: Int) {
+        prefs.edit().putBoolean("adv_reward_claimed_$level", true).apply()
+    }
+
+    fun getAdventureHighScore(level: Int): Int =
+        prefs.getInt("adv_best_score_$level", 0)
+
+    fun setAdventureHighScore(level: Int, score: Int) {
+        val current = getAdventureHighScore(level)
+        if (score > current) {
+            prefs.edit().putInt("adv_best_score_$level", score).apply()
+        }
+    }
+
     var selectedThemeId: String
         get() = prefs.getString(KEY_SELECTED_THEME_ID, com.example.model.BoardThemeId.NEON_ARCADE.name)
             ?: com.example.model.BoardThemeId.NEON_ARCADE.name
@@ -93,11 +132,15 @@ class GamePreferences(context: Context) {
 
     fun getUnlockedThemeIds(): Set<String> {
         val stored = prefs.getStringSet(KEY_UNLOCKED_THEME_IDS, emptySet()) ?: emptySet()
-        return stored + com.example.model.BoardThemeId.NEON_ARCADE.name
+        return stored +
+            com.example.model.BoardThemeId.NEON_ARCADE.name +
+            com.example.model.BoardThemeId.CLASSIC_BLOCK.name
     }
 
     fun isThemeUnlocked(themeId: String): Boolean =
-        themeId == com.example.model.BoardThemeId.NEON_ARCADE.name || getUnlockedThemeIds().contains(themeId)
+        themeId == com.example.model.BoardThemeId.NEON_ARCADE.name ||
+            themeId == com.example.model.BoardThemeId.CLASSIC_BLOCK.name ||
+            getUnlockedThemeIds().contains(themeId)
 
     fun unlockTheme(themeId: String) {
         val updated = getUnlockedThemeIds() + themeId
@@ -235,6 +278,9 @@ class GamePreferences(context: Context) {
         private const val KEY_HINT_COUNT = "key_hint_count"
         private const val KEY_SHUFFLE_COUNT = "key_shuffle_count"
         private const val KEY_BOMB_COUNT = "key_bomb_count"
+        private const val KEY_ROTATE_COUNT = "key_rotate_count"
+        private const val KEY_ADVENTURE_CURRENT_LEVEL = "key_adventure_current_level"
+        private const val KEY_ADVENTURE_MAX_UNLOCKED_LEVEL = "key_adventure_max_unlocked_level"
         private const val KEY_SELECTED_THEME_ID = "key_selected_theme_id"
         private const val KEY_UNLOCKED_THEME_IDS = "key_unlocked_theme_ids"
         private const val KEY_TOTAL_ALL_TIME_SCORE = "key_total_all_time_score"

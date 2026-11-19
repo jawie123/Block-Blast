@@ -70,6 +70,7 @@ fun ShopDialog(
     hintCount: Int,
     shuffleCount: Int,
     bombCount: Int,
+    rotateCount: Int = 0,
     isRewardedAdReady: Boolean = false,
     isRewardedAdLoading: Boolean = false,
     isAdShowing: Boolean = false,
@@ -197,7 +198,7 @@ fun ShopDialog(
                 ) {
                     if (activeTab == ShopTab.THEMES) {
                         for (theme in BoardThemeCatalog.allThemes) {
-                            val isUnlocked = theme.id == BoardThemeId.NEON_ARCADE ||
+                            val isUnlocked = theme.costCoins == 0 ||
                                 unlockedThemeIds.contains(theme.id.name)
                             val isEquipped = selectedThemeId == theme.id.name
                             val canAfford = coinsBalance >= theme.costCoins
@@ -217,6 +218,7 @@ fun ShopDialog(
                                 ShopBoosterType.HINT -> hintCount
                                 ShopBoosterType.SHUFFLE -> shuffleCount
                                 ShopBoosterType.BOMB -> bombCount
+                                ShopBoosterType.ROTATE -> rotateCount
                             }
                             BoosterShopCard(
                                 booster = booster,

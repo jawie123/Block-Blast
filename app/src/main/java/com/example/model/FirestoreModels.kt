@@ -48,7 +48,12 @@ data class SavedGameSessionData(
     val dailyBatchIndex: Int,
     val hammerCount: Int,
     val clientUpdatedAt: Long,
-    val timeRemainingMs: Long = 60_000L
+    val timeRemainingMs: Long = 60_000L,
+    val adventureLevelNumber: Int = 1,
+    val adventureGemsCollected: Int = 0,
+    val adventureIceBroken: Int = 0,
+    val gemCells: Set<Pair<Int, Int>> = emptySet(),
+    val iceCells: Map<Pair<Int, Int>, Int> = emptyMap()
 )
 
 @IgnoreExtraProperties

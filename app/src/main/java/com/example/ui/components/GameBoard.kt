@@ -260,6 +260,12 @@ fun GridBoard(
                             val isProspective = isRowProspective || gameState.prospectiveCols.contains(c)
                             val isHammerTarget = gameState.isHammerActive && colorId > 0
                             val isBombTarget = gameState.isBombActive && colorId > 0
+                            val isGem = colorId > 0 && gameState.gemCells.isNotEmpty() && (r to c) in gameState.gemCells
+                            val iceLayers = if (colorId > 0 && gameState.iceCells.isNotEmpty()) {
+                                gameState.iceCells[r to c] ?: 0
+                            } else {
+                                0
+                            }
                             val cellPulse = if (isProspective || isHammerTarget || isBombTarget) {
                                 sharedPulseAlpha
                             } else {
@@ -280,6 +286,8 @@ fun GridBoard(
                                     isProspectiveClear = isProspective,
                                     isHammerTarget = isHammerTarget,
                                     isBombTarget = isBombTarget,
+                                    isGem = isGem,
+                                    iceLayers = iceLayers,
                                     theme = theme,
                                     emptyTileTint = stableEmptyTint,
                                     pulseAlpha = cellPulse

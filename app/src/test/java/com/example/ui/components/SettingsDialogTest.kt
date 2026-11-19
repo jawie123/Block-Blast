@@ -235,4 +235,47 @@ class SettingsDialogTest {
         composeTestRule.onNodeWithTag("settings_sfx_switch").assertIsOn()
         composeTestRule.onNodeWithTag("settings_haptics_switch").assertIsOn()
     }
+
+    @Test
+    fun `settings dialog theme selector switches between neon and classic themes`() {
+        var selectedTheme by mutableStateOf(com.example.model.BoardThemeId.NEON_ARCADE.name)
+        var shopOpened = false
+
+        composeTestRule.setContent {
+            SettingsDialog(
+                isMusicEnabled = true,
+                isSoundEnabled = true,
+                isHapticsEnabled = true,
+                selectedThemeId = selectedTheme,
+                unlockedThemeIds = setOf(
+                    com.example.model.BoardThemeId.NEON_ARCADE.name,
+                    com.example.model.BoardThemeId.CLASSIC_BLOCK.name
+                ),
+                onSelectTheme = { selectedTheme = it.name },
+                onOpenThemeShop = { shopOpened = true },
+                onToggleMusic = {},
+                onToggleSound = {},
+                onToggleHaptics = {},
+                onDismiss = {}
+            )
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("settings_theme_selector_row")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_theme_chip_${com.example.model.BoardThemeId.CLASSIC_BLOCK.name}")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        assertTrue(selectedTheme == com.example.model.BoardThemeId.CLASSIC_BLOCK.name)
+
+        // Clicking a locked theme redirects to the Theme Shop
+        composeTestRule.onNodeWithTag("settings_theme_chip_${com.example.model.BoardThemeId.COZY_WOOD.name}")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(shopOpened)
+    }
 }

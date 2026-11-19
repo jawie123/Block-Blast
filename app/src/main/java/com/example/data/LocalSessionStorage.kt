@@ -178,6 +178,15 @@ class LocalSessionStorage(context: Context) {
             }
         }
 
+        val gemsArr = JSONArray()
+        for ((r, c) in session.gemCells) {
+            gemsArr.put("$r,$c")
+        }
+        val iceObj = JSONObject()
+        for ((coord, hits) in session.iceCells) {
+            iceObj.put("${coord.first},${coord.second}", hits)
+        }
+
         return JSONObject().apply {
             put("gameMode", session.gameMode.name)
             put("grid", gridArr)
@@ -193,6 +202,11 @@ class LocalSessionStorage(context: Context) {
             put("hammerCount", session.hammerCount)
             put("clientUpdatedAt", session.clientUpdatedAt)
             put("timeRemainingMs", session.timeRemainingMs)
+            put("adventureLevelNumber", session.adventureLevelNumber)
+            put("adventureGemsCollected", session.adventureGemsCollected)
+            put("adventureIceBroken", session.adventureIceBroken)
+            put("gemCells", gemsArr)
+            put("iceCells", iceObj)
         }
     }
 
@@ -234,6 +248,39 @@ class LocalSessionStorage(context: Context) {
             }
         }
 
+        val gemSet = mutableSetOf<Pair<Int, Int>>()
+        val gemsArr = json.optJSONArray("gemCells")
+        if (gemsArr != null) {
+            for (i in 0 until gemsArr.length()) {
+                val parts = gemsArr.optString(i, "").split(",")
+                if (parts.size == 2) {
+                    val r = parts[0].toIntOrNull()
+                    val c = parts[1].toIntOrNull()
+                    if (r != null && c != null && r in 0..7 && c in 0..7) {
+                        gemSet.add(r to c)
+                    }
+                }
+            }
+        }
+
+        val iceMap = mutableMapOf<Pair<Int, Int>, Int>()
+        val iceObj = json.optJSONObject("iceCells")
+        if (iceObj != null) {
+            val keys = iceObj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val parts = key.split(",")
+                if (parts.size == 2) {
+                    val r = parts[0].toIntOrNull()
+                    val c = parts[1].toIntOrNull()
+                    val hits = iceObj.optInt(key, 1)
+                    if (r != null && c != null && r in 0..7 && c in 0..7 && hits > 0) {
+                        iceMap[r to c] = hits.coerceIn(1, 2)
+                    }
+                }
+            }
+        }
+
         return SavedGameSessionData(
             gameMode = gameMode,
             grid = grid,
@@ -248,7 +295,12 @@ class LocalSessionStorage(context: Context) {
             dailyBatchIndex = json.optInt("dailyBatchIndex", 0),
             hammerCount = json.optInt("hammerCount", 3),
             clientUpdatedAt = json.optLong("clientUpdatedAt", 0L),
-            timeRemainingMs = json.optLong("timeRemainingMs", 60_000L)
+            timeRemainingMs = json.optLong("timeRemainingMs", 60_000L),
+            adventureLevelNumber = json.optInt("adventureLevelNumber", 1).coerceAtLeast(1),
+            adventureGemsCollected = json.optInt("adventureGemsCollected", 0).coerceAtLeast(0),
+            adventureIceBroken = json.optInt("adventureIceBroken", 0).coerceAtLeast(0),
+            gemCells = gemSet,
+            iceCells = iceMap
         )
     }
 

@@ -9,7 +9,8 @@ enum class RewardedAdRewardType {
     SECOND_CHANCE,
     FREE_HAMMER,
     FREE_SHUFFLE,
-    FREE_BOMB
+    FREE_BOMB,
+    FREE_ROTATE
 }
 
 data class AdUiState(

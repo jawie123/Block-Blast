@@ -15,7 +15,8 @@ data class ScorePopup(
 enum class GameMode {
     CLASSIC,
     TIME_ATTACK,
-    DAILY_CHALLENGE
+    DAILY_CHALLENGE,
+    ADVENTURE
 }
 
 enum class GameOverReason {
@@ -82,6 +83,20 @@ data class GameState(
     val shuffleCount: Int = 2,
     val bombCount: Int = 1,
     val isBombActive: Boolean = false,
+    val rotateCount: Int = 3,
+    val isRotateActive: Boolean = false,
+    val gemCells: Set<Pair<Int, Int>> = emptySet(),
+    val iceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
+    val adventureLevelNumber: Int = 1,
+    val adventureMaxUnlockedLevel: Int = 1,
+    val adventureGemsCollected: Int = 0,
+    val adventureIceBroken: Int = 0,
+    val adventureInitialIceTotal: Int = 0,
+    val adventureLevelCompleted: Boolean = false,
+    val adventureEarnedStars: Int = 0,
+    val adventureLastRewardCoins: Int = 0,
+    val boardClearEventId: Long = 0L,
+    val shakeEventId: Long = 0L,
     val selectedThemeId: String = BoardThemeId.NEON_ARCADE.name,
     val unlockedThemeIds: Set<String> = setOf(BoardThemeId.NEON_ARCADE.name),
     val dailyMissions: List<DailyMission> = emptyList(),

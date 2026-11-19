@@ -58,6 +58,7 @@ fun PieceSlot(
     canFit: Boolean,
     isSelected: Boolean,
     isDragging: Boolean,
+    isRotateMode: Boolean = false,
     onSelectPiece: (index: Int?) -> Unit,
     onDragStart: (index: Int, touchPosRoot: Offset) -> Unit,
     onDragMove: (delta: Offset) -> Unit,
@@ -74,10 +75,13 @@ fun PieceSlot(
     val currentShape by rememberUpdatedState(shape)
     val currentCanFit by rememberUpdatedState(canFit)
     val currentIsSelected by rememberUpdatedState(isSelected)
+    val currentIsRotateMode by rememberUpdatedState(isRotateMode)
     val currentOnSelectPiece by rememberUpdatedState(onSelectPiece)
     val currentOnDragStart by rememberUpdatedState(onDragStart)
     val currentOnDragMove by rememberUpdatedState(onDragMove)
     val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+
+    val canRotateThis = isRotateMode && shape != null && !shape.isRotationSymmetric()
 
     Box(
         modifier = modifier
@@ -85,8 +89,9 @@ fun PieceSlot(
             .clip(RoundedCornerShape(12.dp))
             .background(theme.boardBackground)
             .border(
-                width = if (isSelected || isDragging) 2.dp else 1.dp,
+                width = if (isSelected || isDragging || canRotateThis) 2.dp else 1.dp,
                 color = when {
+                    canRotateThis -> Color(0xFFE040FB)
                     isDragging -> theme.accentColor.copy(alpha = 0.6f)
                     isSelected -> theme.accentColor
                     else -> theme.boardBorder
@@ -101,7 +106,8 @@ fun PieceSlot(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val activeShape = currentShape
                     val fits = currentCanFit
-                    if (activeShape == null || !fits) {
+                    val rotateMode = currentIsRotateMode
+                    if (activeShape == null || (!fits && !rotateMode)) {
                         return@awaitEachGesture
                     }
 
@@ -119,7 +125,9 @@ fun PieceSlot(
                                     currentOnDragEnd()
                                 } else {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    if (currentIsSelected) {
+                                    if (rotateMode) {
+                                        currentOnSelectPiece(index)
+                                    } else if (currentIsSelected) {
                                         currentOnSelectPiece(null)
                                     } else {
                                         currentOnSelectPiece(index)
@@ -129,7 +137,7 @@ fun PieceSlot(
                             }
 
                             val delta = change.positionChange()
-                            if (delta != Offset.Zero) {
+                            if (delta != Offset.Zero && fits && !rotateMode) {
                                 accumulatedOffset += delta
                                 if (!dragStarted && accumulatedOffset.getDistance() >= dragThresholdPx) {
                                     dragStarted = true
@@ -168,7 +176,7 @@ fun PieceSlot(
                 // Keep mounted during drag to sustain pointerInput events while hiding static piece
                 Box(
                     modifier = Modifier.alpha(
-                        if (isDragging) 0f else if (canFit) 1.0f else 0.38f
+                        if (isDragging) 0f else if (canFit || isRotateMode) 1.0f else 0.38f
                     )
                 ) {
                     val maxDim = maxOf(shape.width, shape.height)
@@ -185,7 +193,24 @@ fun PieceSlot(
                 }
             }
 
-            if (!canFit && !isDragging) {
+            if (canRotateThis && !isDragging) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFFE040FB))
+                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                        .testTag("piece_rotate_badge_$index")
+                ) {
+                    Text(
+                        text = "↻ TAP",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            } else if (!canFit && !isDragging) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -219,6 +244,7 @@ fun PieceDeck(
     onDragStart: (index: Int, touchPosRoot: Offset) -> Unit,
     onDragMove: (delta: Offset) -> Unit,
     onDragEnd: () -> Unit,
+    isRotateMode: Boolean = false,
     compactMode: Boolean = false,
     theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
@@ -238,6 +264,7 @@ fun PieceDeck(
                 canFit = canFitList.getOrNull(i) ?: true,
                 isSelected = selectedShapeIndex == i,
                 isDragging = draggingPieceIndex == i,
+                isRotateMode = isRotateMode,
                 onSelectPiece = onSelectPiece,
                 onDragStart = onDragStart,
                 onDragMove = onDragMove,

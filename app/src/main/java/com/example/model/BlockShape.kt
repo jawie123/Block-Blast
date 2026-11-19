@@ -48,6 +48,25 @@ data class BlockShape(
     val height: Int = matrix.size
     val width: Int = if (matrix.isNotEmpty()) matrix[0].size else 0
     val cellCount: Int = matrix.sumOf { row -> row.count { it } }
+
+    fun rotate90Clockwise(): BlockShape {
+        if (matrix.isEmpty() || matrix[0].isEmpty()) return this
+        val rotated = List(width) { newRow ->
+            List(height) { newCol ->
+                matrix[height - 1 - newCol][newRow]
+            }
+        }
+        return copy(
+            instanceId = UUID.randomUUID().toString(),
+            matrix = rotated
+        )
+    }
+
+    fun isRotationSymmetric(): Boolean {
+        if (matrix.isEmpty() || matrix[0].isEmpty()) return true
+        val rotated = rotate90Clockwise().matrix
+        return rotated == matrix
+    }
 }
 
 data class ShapeSpec(

@@ -12,6 +12,7 @@ import com.example.ui.theme.JewelPalettes
 
 enum class BoardThemeId {
     NEON_ARCADE,
+    CLASSIC_BLOCK,
     COZY_WOOD,
     CANDY_CRYSTAL,
     MIDNIGHT_OLED
@@ -46,6 +47,12 @@ enum class ShopBoosterType(
         emoji = "💣",
         description = "Blast a 3×3 zone clear on the board",
         coinCost = 75
+    ),
+    ROTATE(
+        title = "Piece Rotate",
+        emoji = "↻",
+        description = "Rotate any tray piece 90° to fit",
+        coinCost = 30
     )
 }
 
@@ -162,8 +169,34 @@ object BoardThemeCatalog {
         )
     )
 
+    private val classicBlockTheme = BoardThemeSpec(
+        id = BoardThemeId.CLASSIC_BLOCK,
+        name = "Classic",
+        subtitle = "Crisp retro primary block style",
+        badgeEmoji = "🧩",
+        costCoins = 0,
+        screenBackground = Color(0xFF141824),
+        boardBackground = Color(0xFF1E2436),
+        boardBorder = Color(0xFF3A4466),
+        cellEmpty = Color(0xFF262D45),
+        cellEmptyBorder = Color(0xFF384263),
+        accentColor = Color(0xFF4FC3F7),
+        isWoodStyle = false,
+        palettes = mapOf(
+            1 to BlockPalette(Color(0xFFE53935), Color(0xFFEF5350), Color(0xFFB71C1C), Color(0x80E53935)),
+            2 to BlockPalette(Color(0xFFFB8C00), Color(0xFFFFA726), Color(0xFFE65100), Color(0x80FB8C00)),
+            3 to BlockPalette(Color(0xFFFDD835), Color(0xFFFFEE58), Color(0xFFF9A825), Color(0x80FDD835)),
+            4 to BlockPalette(Color(0xFF43A047), Color(0xFF66BB6A), Color(0xFF1B5E20), Color(0x8043A047)),
+            5 to BlockPalette(Color(0xFF1E88E5), Color(0xFF42A5F5), Color(0xFF0D47A1), Color(0x801E88E5)),
+            6 to BlockPalette(Color(0xFF8E24AA), Color(0xFFAB47BC), Color(0xFF4A148C), Color(0x808E24AA)),
+            7 to BlockPalette(Color(0xFFD81B60), Color(0xFFEC407A), Color(0xFF880E4F), Color(0x80D81B60)),
+            8 to BlockPalette(Color(0xFF00ACC1), Color(0xFF26C6DA), Color(0xFF006064), Color(0x8000ACC1))
+        )
+    )
+
     val allThemes: List<BoardThemeSpec> = listOf(
         defaultTheme,
+        classicBlockTheme,
         cozyWoodTheme,
         candyCrystalTheme,
         midnightOledTheme

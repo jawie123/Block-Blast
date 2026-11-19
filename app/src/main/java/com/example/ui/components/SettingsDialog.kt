@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,8 +27,10 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Vibration
@@ -61,6 +64,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.model.Achievement
 import com.example.model.AchievementCatalog
+import com.example.model.BoardThemeCatalog
+import com.example.model.BoardThemeId
 import com.example.ui.theme.BoardBackground
 import com.example.ui.theme.BoardBorder
 
@@ -71,6 +76,13 @@ fun SettingsDialog(
     isHapticsEnabled: Boolean,
     isPrivacyOptionsRequired: Boolean = false,
     achievements: List<Achievement> = AchievementCatalog.evaluateAll(0, 0, 0, 0, 0),
+    selectedThemeId: String = BoardThemeId.NEON_ARCADE.name,
+    unlockedThemeIds: Set<String> = setOf(
+        BoardThemeId.NEON_ARCADE.name,
+        BoardThemeId.CLASSIC_BLOCK.name
+    ),
+    onSelectTheme: (BoardThemeId) -> Unit = {},
+    onOpenThemeShop: () -> Unit = {},
     onToggleMusic: () -> Unit,
     onToggleSound: () -> Unit,
     onToggleHaptics: () -> Unit,
@@ -216,6 +228,104 @@ fun SettingsDialog(
                         switchTag = "settings_haptics_switch",
                         onToggle = onToggleHaptics
                     )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Quick Board Theme Selector (Neon, Classic, Wood, Candy, Obsidian)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "BOARD THEME",
+                                fontSize = 10.sp,
+                                color = Color(0xFF8E9BB0),
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
+                            )
+                        }
+                        Text(
+                            text = "THEME SHOP →",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFFFD700),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onOpenThemeShop() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .testTag("settings_open_theme_shop_button")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .testTag("settings_theme_selector_row"),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        for (theme in BoardThemeCatalog.allThemes) {
+                            val isSelected = selectedThemeId == theme.id.name
+                            val isUnlocked = theme.costCoins == 0 || unlockedThemeIds.contains(theme.id.name)
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isSelected) theme.accentColor.copy(alpha = 0.2f)
+                                        else Color(0xFF0F111E)
+                                    )
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) theme.accentColor else BoardBorder,
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable {
+                                        if (isUnlocked) onSelectTheme(theme.id) else onOpenThemeShop()
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    .testTag("settings_theme_chip_${theme.id.name}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(text = theme.badgeEmoji, fontSize = 13.sp)
+                                Text(
+                                    text = theme.name,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold,
+                                    color = if (isSelected) Color.White else Color(0xFFB4C0D8),
+                                    maxLines = 1
+                                )
+                                if (!isUnlocked) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = "Locked",
+                                        tint = Color(0xFFFFD700),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                } else if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Active",
+                                        tint = theme.accentColor,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     if (isPrivacyOptionsRequired) {
                         Spacer(modifier = Modifier.height(14.dp))
