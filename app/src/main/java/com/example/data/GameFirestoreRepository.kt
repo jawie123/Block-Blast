@@ -505,7 +505,7 @@ class GameFirestoreRepository(
     private fun sessionDocId(mode: GameMode): String? = when (mode) {
         GameMode.CLASSIC -> "classic"
         GameMode.DAILY_CHALLENGE -> "daily"
-        GameMode.TIME_ATTACK, GameMode.ADVENTURE -> null
+        GameMode.TIME_ATTACK, GameMode.ADVENTURE, GameMode.ZEN -> null
     }
 
     /**

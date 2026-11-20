@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import com.example.model.BoardThemeCatalog
 import com.example.model.BoardThemeSpec
+import com.example.model.GameMode
 import com.example.model.GameState
 import com.example.model.ScorePopup
 import com.example.ui.theme.BoardBackground
@@ -80,7 +81,9 @@ fun GridBoard(
     val isBombMode = gameState.isBombActive
     val isColorBlastMode = gameState.isColorBlastActive
 
-    // Dynamic background colors responding smoothly to combo streaks, fever mode, boosters, and themes
+    val isZenMode = gameState.gameMode == GameMode.ZEN
+
+    // Dynamic background colors responding smoothly to combo streaks, fever mode, boosters, Zen, and themes
     val targetBgTop = when {
         isBombMode -> Color(0xFF281210)
         isColorBlastMode -> Color(0xFF281238)
@@ -89,6 +92,7 @@ fun GridBoard(
         streak >= 3 -> Color(0xFF2A1028) // Fiery Crimson / Magenta aura
         streak == 2 -> Color(0xFF1B1438) // Electric Purple aura
         streak == 1 -> Color(0xFF101E33) // Electric Cyan aura
+        isZenMode -> Color(0xFF0E2326) // Calm Seafoam-Teal aura
         else -> theme.boardBackground
     }
 
@@ -100,6 +104,7 @@ fun GridBoard(
         streak >= 3 -> Color(0xFF1A0A19)
         streak == 2 -> Color(0xFF110D24)
         streak == 1 -> Color(0xFF0C1422)
+        isZenMode -> Color(0xFF09161A)
         else -> theme.boardBackground.copy(alpha = 0.94f)
     }
 
@@ -111,6 +116,7 @@ fun GridBoard(
         streak >= 3 -> Color(0xFFFF007A) // Hot Pink / Neon Crimson
         streak == 2 -> Color(0xFF9C27B0) // Vivid Purple
         streak == 1 -> Color(0xFF00E5FF) // Electric Cyan
+        isZenMode -> Color(0xFF26A69A) // Calm Teal border
         else -> theme.boardBorder
     }
 
@@ -122,6 +128,7 @@ fun GridBoard(
         streak >= 3 -> Color(0xFFFF1744)
         streak == 2 -> Color(0xFF7C4DFF)
         streak == 1 -> Color(0xFF00E5FF)
+        isZenMode -> Color(0xFF26A69A).copy(alpha = 0.35f)
         else -> theme.accentColor.copy(alpha = 0.25f)
     }
 
@@ -287,6 +294,8 @@ fun GridBoard(
                             } else {
                                 0
                             }
+                            val isLocked = colorId > 0 && gameState.lockedCells.isNotEmpty() && (r to c) in gameState.lockedCells
+                            val isMysteryCrate = colorId > 0 && gameState.mysteryCells.isNotEmpty() && (r to c) in gameState.mysteryCells
                             val cellPulse = if (isProspective || isHammerTarget || isBombTarget || isColorBlastTarget) {
                                 sharedPulseAlpha
                             } else {
@@ -311,6 +320,8 @@ fun GridBoard(
                                     isGem = isGem,
                                     isLightning = isLightning,
                                     iceLayers = iceLayers,
+                                    isLocked = isLocked,
+                                    isMysteryCrate = isMysteryCrate,
                                     theme = theme,
                                     emptyTileTint = stableEmptyTint,
                                     pulseAlpha = cellPulse

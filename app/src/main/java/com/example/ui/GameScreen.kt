@@ -1,7 +1,11 @@
 package com.example.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -85,6 +89,7 @@ import com.example.model.BoardThemeSpec
 import com.example.model.DailyLoginRewardSchedule
 import com.example.model.GameMode
 import com.example.model.ShopBoosterType
+import com.example.notifications.DailyReminderScheduler
 import com.example.ui.components.AdventureLevelCompleteDialog
 import com.example.ui.components.AdventureLevelsDialog
 import com.example.ui.components.BoosterBar
@@ -140,6 +145,17 @@ fun GameScreen(
     var freeBoosterPromptType by remember { mutableStateOf<RewardedAdRewardType?>(null) }
     var leaderboardInitialTab by remember { mutableStateOf(LeaderboardTab.HIGH_SCORES) }
     var isLifecyclePaused by remember { mutableStateOf(false) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.setDailyRemindersEnabled(true)
+        } else {
+            viewModel.setDailyRemindersEnabled(false)
+            viewModel.showTemporaryBanner("NOTIFICATION PERMISSION NEEDED FOR REMINDERS")
+        }
+    }
 
     val activeTheme = remember(gameState.selectedThemeId) {
         BoardThemeCatalog.byId(gameState.selectedThemeId)
@@ -388,6 +404,8 @@ fun GameScreen(
                 adventureGemsCollected = gameState.adventureGemsCollected,
                 adventureIceBroken = gameState.adventureIceBroken,
                 adventureInitialIceTotal = gameState.adventureInitialIceTotal,
+                adventureChainsBroken = gameState.adventureChainsBroken,
+                adventureInitialChainsTotal = gameState.adventureInitialChainsTotal,
                 canClaimFreeLuckySpin = gameState.canClaimFreeLuckySpin,
                 bonusSpinCount = gameState.bonusSpinCount,
                 onOpenLuckySpin = {
@@ -395,6 +413,7 @@ fun GameScreen(
                     showLuckySpinDialog = true
                 },
                 onOpenAdventureMap = { showAdventureMapDialog = true },
+                onRefreshZenTray = { viewModel.refreshZenTray() },
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
                 onShowSettings = { showSettingsDialog = true },
@@ -829,7 +848,10 @@ fun GameScreen(
                 playerOverallBestScore = maxOf(gameState.playerOverallBestScore, gameState.highScore, gameState.score),
                 initialTab = leaderboardInitialTab,
                 isGuestMode = gameState.currentUserId.isBlank(),
-                onSignInWithGoogle = onSignOut
+                onSignInWithGoogle = onSignOut,
+                selectedAvatarId = gameState.selectedAvatarId,
+                playerTotalStars = gameState.playerTotalStars,
+                onSelectAvatar = { avatarId -> viewModel.selectAvatarBadge(avatarId) }
             )
         }
 
@@ -884,7 +906,10 @@ fun GameScreen(
                 highestCombo = gameState.maxComboSession,
                 totalLines = gameState.linesClearedSession,
                 gamesPlayed = 1,
-                onDismiss = { showStatsDialog = false }
+                onDismiss = { showStatsDialog = false },
+                totalAllTimeScore = gameState.totalAllTimeScore,
+                selectedAvatarId = gameState.selectedAvatarId,
+                playerTotalStars = gameState.playerTotalStars
             )
         }
 
@@ -907,6 +932,19 @@ fun GameScreen(
                 onToggleMusic = { viewModel.toggleMusic() },
                 onToggleSound = { viewModel.toggleSound() },
                 onToggleHaptics = { viewModel.toggleHaptics() },
+                isDailyRemindersEnabled = gameState.isDailyRemindersEnabled,
+                onToggleReminders = {
+                    if (gameState.isDailyRemindersEnabled) {
+                        viewModel.setDailyRemindersEnabled(false)
+                    } else if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        !DailyReminderScheduler.hasNotificationPermission(context)
+                    ) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.setDailyRemindersEnabled(true)
+                    }
+                },
                 onShowPrivacyOptions = {
                     val activity = context.findActivity()
                     if (activity != null) {

@@ -192,6 +192,16 @@ class LocalSessionStorage(context: Context) {
             lightningArr.put("$r,$c")
         }
 
+        val lockedArr = JSONArray()
+        for ((r, c) in session.lockedCells) {
+            lockedArr.put("$r,$c")
+        }
+
+        val mysteryArr = JSONArray()
+        for ((r, c) in session.mysteryCells) {
+            mysteryArr.put("$r,$c")
+        }
+
         val heldPieceJson: Any = session.heldPiece?.let { shape ->
             val matrixArr = JSONArray()
             for (row in shape.matrix) {
@@ -232,6 +242,9 @@ class LocalSessionStorage(context: Context) {
             put("canHoldThisTurn", session.canHoldThisTurn)
             put("lightningCells", lightningArr)
             put("feverMovesRemaining", session.feverMovesRemaining)
+            put("lockedCells", lockedArr)
+            put("mysteryCells", mysteryArr)
+            put("adventureChainsBroken", session.adventureChainsBroken)
         }
     }
 
@@ -321,6 +334,36 @@ class LocalSessionStorage(context: Context) {
             }
         }
 
+        val lockedSet = mutableSetOf<Pair<Int, Int>>()
+        val lockedArr = json.optJSONArray("lockedCells")
+        if (lockedArr != null) {
+            for (i in 0 until lockedArr.length()) {
+                val parts = lockedArr.optString(i, "").split(",")
+                if (parts.size == 2) {
+                    val r = parts[0].toIntOrNull()
+                    val c = parts[1].toIntOrNull()
+                    if (r != null && c != null && r in 0..7 && c in 0..7) {
+                        lockedSet.add(r to c)
+                    }
+                }
+            }
+        }
+
+        val mysterySet = mutableSetOf<Pair<Int, Int>>()
+        val mysteryArr = json.optJSONArray("mysteryCells")
+        if (mysteryArr != null) {
+            for (i in 0 until mysteryArr.length()) {
+                val parts = mysteryArr.optString(i, "").split(",")
+                if (parts.size == 2) {
+                    val r = parts[0].toIntOrNull()
+                    val c = parts[1].toIntOrNull()
+                    if (r != null && c != null && r in 0..7 && c in 0..7) {
+                        mysterySet.add(r to c)
+                    }
+                }
+            }
+        }
+
         val heldShape: BlockShape? = json.optJSONObject("heldPiece")?.let { pObj ->
             val id = pObj.optString("id", "")
             val name = pObj.optString("name", id)
@@ -368,7 +411,10 @@ class LocalSessionStorage(context: Context) {
             heldPiece = heldShape,
             canHoldThisTurn = json.optBoolean("canHoldThisTurn", true),
             lightningCells = lightningSet,
-            feverMovesRemaining = json.optInt("feverMovesRemaining", 0).coerceAtLeast(0)
+            feverMovesRemaining = json.optInt("feverMovesRemaining", 0).coerceAtLeast(0),
+            lockedCells = lockedSet,
+            mysteryCells = mysterySet,
+            adventureChainsBroken = json.optInt("adventureChainsBroken", 0).coerceAtLeast(0)
         )
     }
 

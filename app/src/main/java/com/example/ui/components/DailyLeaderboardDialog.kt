@@ -10,6 +10,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,13 +21,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.Button
@@ -56,9 +61,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.model.DailyLeaderboardEntry
 import com.example.model.GameMode
 import com.example.model.GlobalLeaderboardEntry
+import com.example.model.PlayerAvatarCatalog
+import com.example.model.RankTierCatalog
 import com.example.ui.theme.BoardBackground
 import com.example.ui.theme.BoardBorder
 import com.example.ui.theme.GoldAccent
@@ -93,7 +101,10 @@ fun DailyLeaderboardDialog(
     playerOverallBestScore: Int = 0,
     initialTab: LeaderboardTab = LeaderboardTab.HIGH_SCORES,
     isGuestMode: Boolean = false,
-    onSignInWithGoogle: () -> Unit = {}
+    onSignInWithGoogle: () -> Unit = {},
+    selectedAvatarId: String = "rookie",
+    playerTotalStars: Int = 0,
+    onSelectAvatar: (String) -> Unit = {}
 ) {
     var selectedTab by remember(initialTab) { mutableStateOf(initialTab) }
     val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
@@ -109,11 +120,16 @@ fun DailyLeaderboardDialog(
         label = "liveDotAlpha"
     )
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp)
+                .widthIn(max = 420.dp)
+                .heightIn(max = 600.dp)
+                .padding(horizontal = 14.dp, vertical = 8.dp)
                 .testTag("daily_leaderboard_dialog"),
             shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.cardColors(containerColor = BoardBackground),
@@ -122,7 +138,7 @@ fun DailyLeaderboardDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(18.dp),
+                    .padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val isGlobalTab = selectedTab != LeaderboardTab.DAILY
@@ -139,8 +155,8 @@ fun DailyLeaderboardDialog(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(
                                     when (selectedTab) {
                                         LeaderboardTab.HIGH_SCORES -> Brush.linearGradient(
@@ -164,7 +180,7 @@ fun DailyLeaderboardDialog(
                                 },
                                 contentDescription = null,
                                 tint = Color(0xFF101424),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                         Column {
@@ -248,7 +264,7 @@ fun DailyLeaderboardDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 // Tab Switcher: HIGH SCORES vs ALL-TIME vs DAILY
                 Row(
@@ -264,7 +280,7 @@ fun DailyLeaderboardDialog(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(32.dp)
+                            .height(28.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(
                                 if (isHighScores) {
@@ -291,7 +307,7 @@ fun DailyLeaderboardDialog(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(32.dp)
+                            .height(28.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(
                                 if (isAllTime) {
@@ -318,7 +334,7 @@ fun DailyLeaderboardDialog(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(32.dp)
+                            .height(28.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(
                                 if (isDaily) {
@@ -342,7 +358,7 @@ fun DailyLeaderboardDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 // Player Summary Bar
                 val displayBestHighScore = maxOf(
@@ -371,7 +387,7 @@ fun DailyLeaderboardDialog(
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF101424))
                         .border(1.dp, Color(0xFF283454), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -392,7 +408,7 @@ fun DailyLeaderboardDialog(
                                 LeaderboardTab.ALL_TIME -> numberFormat.format(displayTotalScore)
                                 LeaderboardTab.DAILY -> numberFormat.format(playerBestScore)
                             },
-                            fontSize = 18.sp,
+                            fontSize = 16.sp,
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Black,
                             modifier = Modifier.testTag("leaderboard_player_summary_score")
@@ -407,16 +423,139 @@ fun DailyLeaderboardDialog(
                         )
                         Text(
                             text = myRank,
-                            fontSize = 18.sp,
+                            fontSize = 16.sp,
                             color = GoldAccent,
                             fontWeight = FontWeight.Black
                         )
                     }
                 }
 
+                Spacer(modifier = Modifier.height(5.dp))
+
+                // Player Rank Tier & Avatar Badges Showcase (2-row compact strip)
+                val currentRankTier = RankTierCatalog.fromProgress(displayTotalScore, displayBestHighScore)
+                val nextRankTier = RankTierCatalog.nextTier(currentRankTier)
+                val rankTierColor = Color(currentRankTier.colorHex)
+                val rankProgress = RankTierCatalog.progressToNextTier(displayTotalScore, displayBestHighScore)
+                val activeAvatar = PlayerAvatarCatalog.byId(selectedAvatarId)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF101424))
+                        .border(1.dp, rankTierColor.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.testTag("player_rank_badge")
+                        ) {
+                            Text(text = activeAvatar.emoji, fontSize = 13.sp)
+                            Text(
+                                text = "${currentRankTier.badge} ${currentRankTier.title.uppercase()}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = rankTierColor,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFF1A2138))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(rankProgress.coerceIn(0.05f, 1f))
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(rankTierColor)
+                            )
+                        }
+                        Text(
+                            text = if (nextRankTier != null) {
+                                "→ ${nextRankTier.badge} ${nextRankTier.title}"
+                            } else {
+                                "👑 MAX"
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF9BA8C2),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (spec in PlayerAvatarCatalog.allAvatars) {
+                            val unlocked = spec.isUnlocked(currentRankTier, playerTotalStars)
+                            val isSelected = spec.id == selectedAvatarId
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(
+                                        when {
+                                            isSelected -> rankTierColor.copy(alpha = 0.22f)
+                                            unlocked -> Color(0xFF171C32)
+                                            else -> Color(0xFF0C0F1C)
+                                        }
+                                    )
+                                    .border(
+                                        width = if (isSelected) 1.4.dp else 1.dp,
+                                        color = when {
+                                            isSelected -> rankTierColor
+                                            unlocked -> BoardBorder
+                                            else -> Color(0xFF20263C)
+                                        },
+                                        shape = RoundedCornerShape(7.dp)
+                                    )
+                                    .clickable { onSelectAvatar(spec.id) }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .testTag("avatar_badge_${spec.id}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(text = spec.emoji, fontSize = 11.sp)
+                                if (!unlocked) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = "Locked",
+                                        tint = Color(0xFF6B768C),
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                } else if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Selected",
+                                        tint = rankTierColor,
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Direct Score Comparison Banner on High Scores Tab
                 if (selectedTab == LeaderboardTab.HIGH_SCORES && highScoreEntries.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(5.dp))
                     HighScoreComparisonBanner(
                         entries = highScoreEntries,
                         currentUserId = currentUserId,
@@ -425,13 +564,13 @@ fun DailyLeaderboardDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(5.dp))
 
                 // Entries List
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 120.dp, max = 300.dp),
+                        .heightIn(min = 96.dp, max = 230.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     when (selectedTab) {
@@ -594,7 +733,7 @@ fun DailyLeaderboardDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 if (gameMode != GameMode.DAILY_CHALLENGE) {
                     Button(
@@ -604,7 +743,7 @@ fun DailyLeaderboardDialog(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
+                            .height(40.dp)
                             .testTag("play_daily_from_leaderboard_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
@@ -622,14 +761,14 @@ fun DailyLeaderboardDialog(
                             fontWeight = FontWeight.Black
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
 
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(42.dp)
+                        .height(38.dp)
                         .testTag("dismiss_leaderboard_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E2640))
@@ -738,28 +877,28 @@ private fun GuestLeaderboardPrompt(onSignInWithGoogle: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
             .testTag("leaderboard_guest_prompt"),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Text(
             text = "Guest Mode Active",
             color = Color.White,
-            fontSize = 14.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Black
         )
         Text(
             text = "Sign in with Google to sync your high score and compete on the live global & daily leaderboards.",
             color = Color(0xFF8E9BB0),
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             textAlign = TextAlign.Center
         )
         Button(
             onClick = onSignInWithGoogle,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp)
+                .height(40.dp)
                 .testTag("leaderboard_guest_sign_in_button"),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
@@ -848,11 +987,16 @@ private fun HighScoreLeaderboardRow(
                 )
             }
 
+            val entryTier = RankTierCatalog.fromProgress(entry.totalScore, entry.bestScore.toInt())
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
+                    Text(
+                        text = entryTier.badge,
+                        fontSize = 12.sp
+                    )
                     Text(
                         text = entry.displayName.ifBlank { "Player" },
                         color = Color.White,
@@ -961,11 +1105,16 @@ private fun GlobalLeaderboardRow(
                 )
             }
 
+            val entryTier = RankTierCatalog.fromProgress(entry.totalScore, entry.bestScore.toInt())
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
+                    Text(
+                        text = entryTier.badge,
+                        fontSize = 12.sp
+                    )
                     Text(
                         text = entry.displayName.ifBlank { "Player" },
                         color = Color.White,

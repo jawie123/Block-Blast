@@ -57,7 +57,10 @@ data class SavedGameSessionData(
     val heldPiece: BlockShape? = null,
     val canHoldThisTurn: Boolean = true,
     val lightningCells: Set<Pair<Int, Int>> = emptySet(),
-    val feverMovesRemaining: Int = 0
+    val feverMovesRemaining: Int = 0,
+    val lockedCells: Set<Pair<Int, Int>> = emptySet(),
+    val mysteryCells: Set<Pair<Int, Int>> = emptySet(),
+    val adventureChainsBroken: Int = 0
 )
 
 @IgnoreExtraProperties

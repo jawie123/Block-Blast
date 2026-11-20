@@ -16,7 +16,8 @@ enum class GameMode {
     CLASSIC,
     TIME_ATTACK,
     DAILY_CHALLENGE,
-    ADVENTURE
+    ADVENTURE,
+    ZEN
 }
 
 enum class GameOverReason {
@@ -96,15 +97,20 @@ data class GameState(
     val lastSpinReward: LuckySpinResult? = null,
     val gemCells: Set<Pair<Int, Int>> = emptySet(),
     val iceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
+    val lockedCells: Set<Pair<Int, Int>> = emptySet(),
+    val mysteryCells: Set<Pair<Int, Int>> = emptySet(),
     val adventureLevelNumber: Int = 1,
     val adventureMaxUnlockedLevel: Int = 1,
     val claimedStarChestsCount: Int = 0,
     val adventureGemsCollected: Int = 0,
     val adventureIceBroken: Int = 0,
     val adventureInitialIceTotal: Int = 0,
+    val adventureChainsBroken: Int = 0,
+    val adventureInitialChainsTotal: Int = 0,
     val adventureLevelCompleted: Boolean = false,
     val adventureEarnedStars: Int = 0,
     val adventureLastRewardCoins: Int = 0,
+    val playerTotalStars: Int = 0,
     val boardClearEventId: Long = 0L,
     val shakeEventId: Long = 0L,
     val selectedThemeId: String = BoardThemeId.NEON_ARCADE.name,
@@ -135,6 +141,8 @@ data class GameState(
     val isMusicEnabled: Boolean = true,
     val isSoundEnabled: Boolean = true,
     val isHapticsEnabled: Boolean = true,
+    val isDailyRemindersEnabled: Boolean = false,
+    val selectedAvatarId: String = "rookie",
     val achievements: List<Achievement> = emptyList(),
     val unlockedAchievementsCount: Int = 0,
     val dailyStreak: Int = 0,

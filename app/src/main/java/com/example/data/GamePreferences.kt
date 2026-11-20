@@ -15,6 +15,10 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_TIME_ATTACK_HIGH_SCORE, 0)
         set(value) = prefs.edit().putInt(KEY_TIME_ATTACK_HIGH_SCORE, value).apply()
 
+    var zenHighScore: Int
+        get() = prefs.getInt(KEY_ZEN_HIGH_SCORE, 0)
+        set(value) = prefs.edit().putInt(KEY_ZEN_HIGH_SCORE, value).apply()
+
     var highestCombo: Int
         get() = prefs.getInt(KEY_HIGHEST_COMBO, 0)
         set(value) = prefs.edit().putInt(KEY_HIGHEST_COMBO, value).apply()
@@ -38,6 +42,14 @@ class GamePreferences(context: Context) {
     var isHapticsEnabled: Boolean
         get() = prefs.getBoolean(KEY_HAPTICS_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_HAPTICS_ENABLED, value).apply()
+
+    var isDailyRemindersEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DAILY_REMINDERS_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_DAILY_REMINDERS_ENABLED, value).apply()
+
+    var selectedAvatarId: String
+        get() = prefs.getString(KEY_SELECTED_AVATAR_ID, "rookie") ?: "rookie"
+        set(value) = prefs.edit().putString(KEY_SELECTED_AVATAR_ID, value).apply()
 
     var hasSeenTutorial: Boolean
         get() = prefs.getBoolean(KEY_HAS_SEEN_TUTORIAL, false)
@@ -308,6 +320,9 @@ class GamePreferences(context: Context) {
         private const val KEY_UNLOCKED_THEME_IDS = "key_unlocked_theme_ids"
         private const val KEY_TOTAL_ALL_TIME_SCORE = "key_total_all_time_score"
         private const val KEY_TIME_ATTACK_HIGH_SCORE = "key_time_attack_high_score"
+        private const val KEY_ZEN_HIGH_SCORE = "key_zen_high_score"
+        private const val KEY_DAILY_REMINDERS_ENABLED = "key_daily_reminders_enabled"
+        private const val KEY_SELECTED_AVATAR_ID = "key_selected_avatar_id"
         private const val KEY_DAILY_CHALLENGES_COMPLETED = "key_daily_challenges_completed"
         private const val KEY_IS_GUEST_SESSION = "key_is_guest_session"
         private const val KEY_COINS_BALANCE = "key_coins_balance"

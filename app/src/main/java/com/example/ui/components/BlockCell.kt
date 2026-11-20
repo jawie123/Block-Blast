@@ -42,6 +42,8 @@ fun BlockCell(
     isGem: Boolean = false,
     isLightning: Boolean = false,
     iceLayers: Int = 0,
+    isLocked: Boolean = false,
+    isMysteryCrate: Boolean = false,
     theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     emptyTileTint: Color? = null,
     cornerRadius: Dp = 6.dp,
@@ -91,7 +93,7 @@ fun BlockCell(
             )
         }
 
-        // Filled jewel, gem, ice, or wood block
+        // Filled jewel, gem, ice, chained, mystery crate, or wood block
         colorId > 0 -> {
             val palette = theme.paletteFor(colorId)
             val borderHighlight = when {
@@ -101,11 +103,17 @@ fun BlockCell(
                 isProspectiveClear -> Color.White.copy(alpha = resolvedPulse)
                 iceLayers >= 2 -> Color(0xFFE1F5FE)
                 iceLayers == 1 -> Color(0xFF81D4FA)
+                isLocked -> Color(0xFFB0BEC5)
+                isMysteryCrate -> Color(0xFFFFD54F)
                 isLightning -> Color(0xFFFFEA00)
                 isGem -> Color(0xFFFFD700)
                 else -> palette.light
             }
-            val borderWidth = if (isHammerTarget || isBombTarget || isColorBlastTarget || iceLayers >= 2 || isGem || isLightning) 1.8.dp else 1.dp
+            val borderWidth = when {
+                isLocked -> 2.2.dp
+                isHammerTarget || isBombTarget || isColorBlastTarget || iceLayers >= 2 || isGem || isLightning || isMysteryCrate -> 1.8.dp
+                else -> 1.dp
+            }
             val isWood = theme.isWoodStyle
 
             Box(
@@ -130,6 +138,16 @@ fun BlockCell(
                                 colors = listOf(
                                     Color(0xFFE1F5FE).copy(alpha = if (iceLayers >= 2) 0.62f else 0.36f),
                                     Color(0xFF4FC3F7).copy(alpha = if (iceLayers >= 2) 0.45f else 0.22f)
+                                )
+                            )
+                        } else {
+                            null
+                        }
+                        val mysterySheenBrush = if (isMysteryCrate) {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFFFD54F).copy(alpha = 0.42f),
+                                    Color(0xFFFF8F00).copy(alpha = 0.25f)
                                 )
                             )
                         } else {
@@ -171,6 +189,23 @@ fun BlockCell(
                                     )
                                 }
                             }
+                            if (isLocked) {
+                                drawLine(
+                                    color = Color(0xFFCFD8DC).copy(alpha = 0.72f),
+                                    start = Offset(size.width * 0.12f, size.height * 0.12f),
+                                    end = Offset(size.width * 0.88f, size.height * 0.88f),
+                                    strokeWidth = 2.4f
+                                )
+                                drawLine(
+                                    color = Color(0xFFCFD8DC).copy(alpha = 0.72f),
+                                    start = Offset(size.width * 0.88f, size.height * 0.12f),
+                                    end = Offset(size.width * 0.12f, size.height * 0.88f),
+                                    strokeWidth = 2.4f
+                                )
+                            }
+                            if (mysterySheenBrush != null) {
+                                drawRect(brush = mysterySheenBrush)
+                            }
                         }
                     }
                     .border(borderWidth, borderHighlight, shape)
@@ -178,6 +213,8 @@ fun BlockCell(
                     .testTag(
                         when {
                             iceLayers > 0 -> "block_cell_ice_$iceLayers"
+                            isLocked -> "block_cell_locked"
+                            isMysteryCrate -> "block_cell_mystery"
                             isLightning -> "block_cell_lightning"
                             isGem -> "block_cell_gem"
                             else -> "block_cell_filled"
@@ -188,6 +225,16 @@ fun BlockCell(
                 if (iceLayers > 0) {
                     androidx.compose.material3.Text(
                         text = if (iceLayers >= 2) "❄️" else "🧊",
+                        fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
+                    )
+                } else if (isLocked) {
+                    androidx.compose.material3.Text(
+                        text = "⛓️",
+                        fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
+                    )
+                } else if (isMysteryCrate) {
+                    androidx.compose.material3.Text(
+                        text = "🎁",
                         fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
                     )
                 } else if (isLightning) {

@@ -20,4 +20,8 @@
     <string name="settings_privacy_section_title">PRIVACY &amp; CONSENT</string>
     <string name="settings_privacy_options_label">Privacy &amp; Ad Consent</string>
     <string name="settings_privacy_options_desc">Manage personalized ad preferences</string>
+    <string name="settings_reminders_label">Daily Streak Reminders</string>
+    <string name="settings_reminders_desc">Get notified for Free Spin &amp; Daily Gift</string>
+    <string name="reminder_notification_title">🔥 Keep Your Streak Alive!</string>
+    <string name="reminder_notification_body">Your Free Lucky Spin, Daily Gift &amp; 8×8 Daily Puzzle are ready!</string>
 </resources>

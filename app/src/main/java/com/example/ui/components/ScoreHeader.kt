@@ -98,10 +98,13 @@ fun ScoreHeader(
     adventureGemsCollected: Int = 0,
     adventureIceBroken: Int = 0,
     adventureInitialIceTotal: Int = 0,
+    adventureChainsBroken: Int = 0,
+    adventureInitialChainsTotal: Int = 0,
     canClaimFreeLuckySpin: Boolean = false,
     bonusSpinCount: Int = 0,
     onOpenLuckySpin: () -> Unit = {},
     onOpenAdventureMap: () -> Unit = {},
+    onRefreshZenTray: () -> Unit = {},
     onToggleSound: () -> Unit = {},
     onToggleHaptics: () -> Unit = {},
     onShowSettings: () -> Unit = {},
@@ -319,7 +322,7 @@ fun ScoreHeader(
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // Mode Switcher: Classic vs Time Attack vs Daily vs Adventure
+        // Mode Switcher: Classic vs Time Attack vs Daily vs Adventure vs Zen
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -333,7 +336,7 @@ fun ScoreHeader(
             // Classic Tab
             Box(
                 modifier = Modifier
-                    .weight(0.88f)
+                    .weight(0.84f)
                     .height(25.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(
@@ -349,10 +352,10 @@ fun ScoreHeader(
             ) {
                 Text(
                     text = "CLASSIC",
-                    fontSize = 8.sp,
+                    fontSize = 7.5.sp,
                     fontWeight = if (isClassic) FontWeight.Black else FontWeight.Bold,
                     color = if (isClassic) Color.White else Color(0xFF8E9BB0),
-                    letterSpacing = 0.2.sp,
+                    letterSpacing = 0.sp,
                     maxLines = 1,
                     softWrap = false
                 )
@@ -362,7 +365,7 @@ fun ScoreHeader(
             val isTimeAttack = gameMode == GameMode.TIME_ATTACK
             Box(
                 modifier = Modifier
-                    .weight(1.16f)
+                    .weight(1.14f)
                     .height(25.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(
@@ -384,14 +387,14 @@ fun ScoreHeader(
                         imageVector = Icons.Default.Timer,
                         contentDescription = null,
                         tint = if (isTimeAttack) Color.White else Color(0xFFFF5252),
-                        modifier = Modifier.size(9.dp)
+                        modifier = Modifier.size(8.dp)
                     )
                     Text(
                         text = "TIME ATTACK",
-                        fontSize = 8.sp,
+                        fontSize = 7.5.sp,
                         fontWeight = if (isTimeAttack) FontWeight.Black else FontWeight.Bold,
                         color = if (isTimeAttack) Color.White else Color(0xFF8E9BB0),
-                        letterSpacing = 0.1.sp,
+                        letterSpacing = 0.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -402,7 +405,7 @@ fun ScoreHeader(
             val isDaily = gameMode == GameMode.DAILY_CHALLENGE
             Box(
                 modifier = Modifier
-                    .weight(0.84f)
+                    .weight(0.78f)
                     .height(25.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(
@@ -424,14 +427,14 @@ fun ScoreHeader(
                         imageVector = Icons.Default.CalendarToday,
                         contentDescription = null,
                         tint = if (isDaily) Color(0xFF0F111E) else Color(0xFFFF9800),
-                        modifier = Modifier.size(9.dp)
+                        modifier = Modifier.size(8.dp)
                     )
                     Text(
                         text = "DAILY",
-                        fontSize = 8.sp,
+                        fontSize = 7.5.sp,
                         fontWeight = if (isDaily) FontWeight.Black else FontWeight.Bold,
                         color = if (isDaily) Color(0xFF0F111E) else Color(0xFF8E9BB0),
-                        letterSpacing = 0.2.sp,
+                        letterSpacing = 0.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -442,7 +445,7 @@ fun ScoreHeader(
             val isAdventure = gameMode == GameMode.ADVENTURE
             Box(
                 modifier = Modifier
-                    .weight(1.12f)
+                    .weight(1.10f)
                     .height(25.dp)
                     .clip(RoundedCornerShape(7.dp))
                     .background(
@@ -464,14 +467,52 @@ fun ScoreHeader(
                         imageVector = Icons.Default.Explore,
                         contentDescription = null,
                         tint = if (isAdventure) Color(0xFF0F111E) else Color(0xFF00E676),
-                        modifier = Modifier.size(9.dp)
+                        modifier = Modifier.size(8.dp)
                     )
                     Text(
                         text = "ADVENTURE",
-                        fontSize = 8.sp,
+                        fontSize = 7.5.sp,
                         fontWeight = if (isAdventure) FontWeight.Black else FontWeight.Bold,
                         color = if (isAdventure) Color(0xFF0F111E) else Color(0xFF8E9BB0),
-                        letterSpacing = 0.1.sp,
+                        letterSpacing = 0.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            // Zen Mode Tab
+            val isZen = gameMode == GameMode.ZEN
+            Box(
+                modifier = Modifier
+                    .weight(0.66f)
+                    .height(25.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(
+                        if (isZen) {
+                            Brush.horizontalGradient(listOf(Color(0xFF26A69A), Color(0xFF00BFA5)))
+                        } else {
+                            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                        }
+                    )
+                    .clickable { onSwitchMode(GameMode.ZEN) }
+                    .testTag("mode_tab_zen"),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(1.dp)
+                ) {
+                    Text(
+                        text = "🧘",
+                        fontSize = 8.sp
+                    )
+                    Text(
+                        text = "ZEN",
+                        fontSize = 7.5.sp,
+                        fontWeight = if (isZen) FontWeight.Black else FontWeight.Bold,
+                        color = if (isZen) Color(0xFF0F111E) else Color(0xFF4DB6AC),
+                        letterSpacing = 0.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -694,6 +735,11 @@ fun ScoreHeader(
                     "❄️ $adventureIceBroken/$total" to
                         (adventureIceBroken.toFloat() / total.coerceAtLeast(1))
                 }
+                AdventureGoalType.BREAK_CHAINS -> {
+                    val total = adventureInitialChainsTotal.coerceAtLeast(spec.targetCount)
+                    "⛓️ $adventureChainsBroken/$total" to
+                        (adventureChainsBroken.toFloat() / total.coerceAtLeast(1))
+                }
                 AdventureGoalType.SCORE_TARGET -> {
                     "🎯 $score/${spec.targetCount}" to
                         (score.toFloat() / spec.targetCount.coerceAtLeast(1))
@@ -781,6 +827,59 @@ fun ScoreHeader(
                             softWrap = false
                         )
                     }
+                }
+            }
+        }
+
+        // Zen Mode Calming Banner
+        if (gameMode == GameMode.ZEN) {
+            Spacer(modifier = Modifier.height(3.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF0D2828), Color(0xFF121E32))
+                        )
+                    )
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(listOf(Color(0xFF26A69A), Color(0xFF00E5FF))),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .testTag("zen_mode_banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "🧘 ZEN MODE • NO GAME OVER",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF4DB6AC),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color(0x2626A69A))
+                        .border(0.8.dp, Color(0xFF4DB6AC).copy(alpha = 0.75f), RoundedCornerShape(5.dp))
+                        .clickable(role = Role.Button) { onRefreshZenTray() }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .testTag("zen_refresh_tray_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "🔄 NEW TRAY",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF80CBC4),
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
         }
@@ -875,6 +974,7 @@ fun ScoreHeader(
                                     GameMode.DAILY_CHALLENGE -> "RECORD"
                                     GameMode.TIME_ATTACK -> "TIME BEST"
                                     GameMode.ADVENTURE -> "LV $adventureLevelNumber"
+                                    GameMode.ZEN -> "ZEN BEST"
                                     else -> "BEST"
                                 },
                                 fontSize = 8.sp,

@@ -33,11 +33,14 @@ import com.example.model.LuckySpinCatalog
 import com.example.model.LuckySpinResult
 import com.example.model.MissionType
 import com.example.model.PlacementHint
+import com.example.model.PlayerAvatarCatalog
+import com.example.model.RankTierCatalog
 import com.example.model.SavedGameSessionData
 import com.example.model.ScorePopup
 import com.example.model.ShapeDefinitions
 import com.example.model.ShopBoosterType
 import com.example.model.SpinRewardType
+import com.example.notifications.DailyReminderScheduler
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -88,11 +91,14 @@ class GameViewModel(
             adventureLevelNumber = preferences.adventureCurrentLevel,
             adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
             claimedStarChestsCount = preferences.claimedStarChestsCount,
+            playerTotalStars = computeTotalAdventureStars(),
             selectedThemeId = preferences.selectedThemeId,
             unlockedThemeIds = preferences.getUnlockedThemeIds(),
             isMusicEnabled = preferences.isMusicEnabled,
             isSoundEnabled = preferences.isSoundEnabled,
             isHapticsEnabled = preferences.isHapticsEnabled,
+            isDailyRemindersEnabled = preferences.isDailyRemindersEnabled,
+            selectedAvatarId = preferences.selectedAvatarId,
             currentUserId = currentUserId,
             currentUserDisplayName = currentUserDisplayName
         )
@@ -292,6 +298,7 @@ class GameViewModel(
         val isDaily = session.gameMode == GameMode.DAILY_CHALLENGE
         val isTimeAttack = session.gameMode == GameMode.TIME_ATTACK
         val isAdventure = session.gameMode == GameMode.ADVENTURE
+        val isZen = session.gameMode == GameMode.ZEN
         val adventureLevelSpec = AdventureCatalog.level(session.adventureLevelNumber)
         if (isAdventure) {
             preferences.adventureCurrentLevel = adventureLevelSpec.levelNumber
@@ -305,6 +312,7 @@ class GameViewModel(
             isDaily -> maxOf(preferences.getDailyHighScore(dateStr), session.score)
             isTimeAttack -> maxOf(preferences.timeAttackHighScore, session.score)
             isAdventure -> maxOf(preferences.getAdventureHighScore(adventureLevelSpec.levelNumber), session.score)
+            isZen -> maxOf(preferences.zenHighScore, session.score)
             else -> maxOf(preferences.highScore, session.score)
         }
 
@@ -322,6 +330,7 @@ class GameViewModel(
             isDaily -> "DAILY PUZZLE: $puzzleTitle"
             isTimeAttack -> "TIME ATTACK! 60s GO!"
             isAdventure -> "ADVENTURE LV ${adventureLevelSpec.levelNumber}: ${adventureLevelSpec.title.uppercase()}"
+            isZen -> "🧘 ZEN MODE • RELAX & PLAY"
             else -> null
         }
 
@@ -341,7 +350,7 @@ class GameViewModel(
             comboStreak = session.comboStreak,
             maxComboSession = session.maxComboSession,
             linesClearedSession = session.linesClearedSession,
-            isGameOver = session.isGameOver,
+            isGameOver = if (isZen) false else session.isGameOver,
             isNewHighScore = false,
             secondChanceAvailable = session.secondChanceAvailable,
             selectedShapeIndex = null,
@@ -378,15 +387,20 @@ class GameViewModel(
             bonusSpinCount = preferences.bonusSpinCount,
             gemCells = if (isAdventure) session.gemCells else emptySet(),
             iceCells = if (isAdventure) session.iceCells else emptyMap(),
+            lockedCells = if (isAdventure) session.lockedCells else emptySet(),
+            mysteryCells = if (isAdventure) session.mysteryCells else emptySet(),
             adventureLevelNumber = adventureLevelSpec.levelNumber,
             adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
             claimedStarChestsCount = preferences.claimedStarChestsCount,
             adventureGemsCollected = session.adventureGemsCollected,
             adventureIceBroken = session.adventureIceBroken,
             adventureInitialIceTotal = adventureLevelSpec.initialIceCells.size,
+            adventureChainsBroken = session.adventureChainsBroken,
+            adventureInitialChainsTotal = adventureLevelSpec.initialLockedCells.size,
             adventureLevelCompleted = false,
             adventureEarnedStars = 0,
             adventureLastRewardCoins = 0,
+            playerTotalStars = computeTotalAdventureStars(),
             selectedThemeId = preferences.selectedThemeId,
             unlockedThemeIds = preferences.getUnlockedThemeIds(),
             dailyMissions = dailyMissions,
@@ -415,6 +429,8 @@ class GameViewModel(
             isMusicEnabled = preferences.isMusicEnabled,
             isSoundEnabled = preferences.isSoundEnabled,
             isHapticsEnabled = preferences.isHapticsEnabled,
+            isDailyRemindersEnabled = preferences.isDailyRemindersEnabled,
+            selectedAvatarId = preferences.selectedAvatarId,
             dailyStreak = if (isDaily) {
                 preferences.recordDailyParticipation(dateStr, getYesterdayDateString())
             } else {
@@ -585,10 +601,15 @@ class GameViewModel(
         }
     }
 
+    private fun computeTotalAdventureStars(): Int {
+        return (1..AdventureCatalog.totalLevels).sumOf { preferences.getAdventureLevelStars(it) }
+    }
+
     private fun computeLocalOverallBestScore(dateStr: String = getTodayDateString()): Int {
         return maxOf(
             preferences.highScore,
             preferences.timeAttackHighScore,
+            preferences.zenHighScore,
             preferences.getDailyHighScore(dateStr)
         )
     }
@@ -643,12 +664,15 @@ class GameViewModel(
             heldPiece = state.heldPiece,
             canHoldThisTurn = state.canHoldThisTurn,
             lightningCells = state.lightningCells,
-            feverMovesRemaining = state.feverMovesRemaining
+            feverMovesRemaining = state.feverMovesRemaining,
+            lockedCells = state.lockedCells,
+            mysteryCells = state.mysteryCells,
+            adventureChainsBroken = state.adventureChainsBroken
         )
         localSessionStorage?.saveSessionBackground(session)
 
         if (syncToCloud &&
-            state.gameMode != GameMode.TIME_ATTACK &&
+            (state.gameMode == GameMode.CLASSIC || state.gameMode == GameMode.DAILY_CHALLENGE) &&
             firestoreRepository != null &&
             currentUserId.isNotBlank()
         ) {
@@ -689,17 +713,52 @@ class GameViewModel(
         val feverMovesRemaining: Int = 0,
         val gemCells: Set<Pair<Int, Int>> = emptySet(),
         val iceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
+        val lockedCells: Set<Pair<Int, Int>> = emptySet(),
+        val mysteryCells: Set<Pair<Int, Int>> = emptySet(),
         val heldPiece: BlockShape? = null,
         val canHoldThisTurn: Boolean = true,
         val lightningCells: Set<Pair<Int, Int>> = emptySet(),
         val adventureGemsCollected: Int = 0,
         val adventureIceBroken: Int = 0,
+        val adventureChainsBroken: Int = 0,
         val adventureLevelCompleted: Boolean = false,
         val timeRemainingMs: Long = TIME_ATTACK_INITIAL_MS,
         val gameOverReason: GameOverReason = GameOverReason.NO_MOVES
     )
 
     private var lastUndoSnapshot: UndoSnapshot? = null
+
+    private fun captureUndoSnapshot(state: GameState): UndoSnapshot = UndoSnapshot(
+        grid = state.grid,
+        activePieces = state.activePieces,
+        score = state.score,
+        highScore = state.highScore,
+        comboStreak = state.comboStreak,
+        maxComboSession = state.maxComboSession,
+        linesClearedSession = state.linesClearedSession,
+        isGameOver = state.isGameOver,
+        isNewHighScore = state.isNewHighScore,
+        dailyBatchIndex = state.dailyBatchIndex,
+        hammerCount = state.hammerCount,
+        shuffleCount = state.shuffleCount,
+        bombCount = state.bombCount,
+        rotateCount = state.rotateCount,
+        colorBlastCount = state.colorBlastCount,
+        feverMovesRemaining = state.feverMovesRemaining,
+        gemCells = state.gemCells,
+        iceCells = state.iceCells,
+        lockedCells = state.lockedCells,
+        mysteryCells = state.mysteryCells,
+        heldPiece = state.heldPiece,
+        canHoldThisTurn = state.canHoldThisTurn,
+        lightningCells = state.lightningCells,
+        adventureGemsCollected = state.adventureGemsCollected,
+        adventureIceBroken = state.adventureIceBroken,
+        adventureChainsBroken = state.adventureChainsBroken,
+        adventureLevelCompleted = state.adventureLevelCompleted,
+        timeRemainingMs = state.timeRemainingMs,
+        gameOverReason = state.gameOverReason
+    )
 
     fun computeDailySeed(): Long {
         val cal = Calendar.getInstance()
@@ -755,6 +814,7 @@ class GameViewModel(
         val isDaily = mode == GameMode.DAILY_CHALLENGE
         val isTimeAttack = mode == GameMode.TIME_ATTACK
         val isAdventure = mode == GameMode.ADVENTURE
+        val isZen = mode == GameMode.ZEN
         val dateStr = getTodayDateString()
         val dateFormatted = getTodayFormattedString()
         val seed = computeDailySeed()
@@ -794,6 +854,7 @@ class GameViewModel(
             isDaily -> preferences.getDailyHighScore(dateStr)
             isTimeAttack -> preferences.timeAttackHighScore
             isAdventure -> preferences.getAdventureHighScore(adventureSpec.levelNumber)
+            isZen -> preferences.zenHighScore
             else -> preferences.highScore
         }
 
@@ -814,6 +875,7 @@ class GameViewModel(
             isDaily -> "DAILY PUZZLE: $puzzleTitle"
             isTimeAttack -> "TIME ATTACK! 60s GO!"
             isAdventure -> "LV ${adventureSpec.levelNumber} • ${adventureSpec.title.uppercase()}"
+            isZen -> "🧘 ZEN MODE • NO GAME OVER"
             else -> null
         }
 
@@ -863,15 +925,20 @@ class GameViewModel(
             lastSpinReward = null,
             gemCells = if (isAdventure) adventureSpec.initialGemCells else emptySet(),
             iceCells = if (isAdventure) adventureSpec.initialIceCells else emptyMap(),
+            lockedCells = if (isAdventure) adventureSpec.initialLockedCells else emptySet(),
+            mysteryCells = if (isAdventure) adventureSpec.initialMysteryCells else emptySet(),
             adventureLevelNumber = adventureSpec.levelNumber,
             adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
             claimedStarChestsCount = preferences.claimedStarChestsCount,
             adventureGemsCollected = 0,
             adventureIceBroken = 0,
             adventureInitialIceTotal = if (isAdventure) adventureSpec.initialIceCells.size else 0,
+            adventureChainsBroken = 0,
+            adventureInitialChainsTotal = if (isAdventure) adventureSpec.initialLockedCells.size else 0,
             adventureLevelCompleted = false,
             adventureEarnedStars = 0,
             adventureLastRewardCoins = 0,
+            playerTotalStars = computeTotalAdventureStars(),
             selectedThemeId = preferences.selectedThemeId,
             unlockedThemeIds = preferences.getUnlockedThemeIds(),
             dailyMissions = dailyMissions,
@@ -900,6 +967,8 @@ class GameViewModel(
             isMusicEnabled = preferences.isMusicEnabled,
             isSoundEnabled = preferences.isSoundEnabled,
             isHapticsEnabled = preferences.isHapticsEnabled,
+            isDailyRemindersEnabled = preferences.isDailyRemindersEnabled,
+            selectedAvatarId = preferences.selectedAvatarId,
             dailyStreak = preferences.dailyStreak,
             isDailyCompletedToday = preferences.isDailyDateCompleted(dateStr),
             coinsBalance = preferences.coinsBalance,
@@ -931,11 +1000,12 @@ class GameViewModel(
         )
         ensureTimeAttackTimer()
 
-        if (isTimeAttack) {
+        if (isTimeAttack || isZen) {
+            val transientBanner = banner
             viewModelScope.launch {
                 delay(1400)
                 _gameState.update {
-                    if (it.comboBannerText == "TIME ATTACK! 60s GO!") it.copy(comboBannerText = null) else it
+                    if (it.comboBannerText == transientBanner) it.copy(comboBannerText = null) else it
                 }
             }
         }
@@ -960,7 +1030,10 @@ class GameViewModel(
 
         startNewGame(mode = mode, persistFreshState = false)
 
-        if (mode != GameMode.TIME_ATTACK && firestoreRepository != null && currentUserId.isNotBlank()) {
+        if ((mode == GameMode.CLASSIC || mode == GameMode.DAILY_CHALLENGE) &&
+            firestoreRepository != null &&
+            currentUserId.isNotBlank()
+        ) {
             viewModelScope.launch {
                 val cloud = firestoreRepository.loadSession(mode).getOrNull()
                 if (isSessionResumable(cloud, today) && _gameState.value.gameMode == mode && _gameState.value.score == 0) {
@@ -1015,8 +1088,11 @@ class GameViewModel(
                 lightningCells = snapshot.lightningCells,
                 gemCells = snapshot.gemCells,
                 iceCells = snapshot.iceCells,
+                lockedCells = snapshot.lockedCells,
+                mysteryCells = snapshot.mysteryCells,
                 adventureGemsCollected = snapshot.adventureGemsCollected,
                 adventureIceBroken = snapshot.adventureIceBroken,
+                adventureChainsBroken = snapshot.adventureChainsBroken,
                 adventureLevelCompleted = snapshot.adventureLevelCompleted,
                 timeRemainingMs = snapshot.timeRemainingMs,
                 lastTimeBonusSeconds = 0,
@@ -1315,34 +1391,7 @@ class GameViewModel(
         }
         hasUserInteractedThisSession = true
 
-        lastUndoSnapshot = UndoSnapshot(
-            grid = currentState.grid,
-            activePieces = currentState.activePieces,
-            score = currentState.score,
-            highScore = currentState.highScore,
-            comboStreak = currentState.comboStreak,
-            maxComboSession = currentState.maxComboSession,
-            linesClearedSession = currentState.linesClearedSession,
-            isGameOver = currentState.isGameOver,
-            isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount,
-            shuffleCount = currentState.shuffleCount,
-            bombCount = currentState.bombCount,
-            rotateCount = currentState.rotateCount,
-            colorBlastCount = currentState.colorBlastCount,
-            feverMovesRemaining = currentState.feverMovesRemaining,
-            gemCells = currentState.gemCells,
-            iceCells = currentState.iceCells,
-            heldPiece = currentState.heldPiece,
-            canHoldThisTurn = currentState.canHoldThisTurn,
-            lightningCells = currentState.lightningCells,
-            adventureGemsCollected = currentState.adventureGemsCollected,
-            adventureIceBroken = currentState.adventureIceBroken,
-            adventureLevelCompleted = currentState.adventureLevelCompleted,
-            timeRemainingMs = currentState.timeRemainingMs,
-            gameOverReason = currentState.gameOverReason
-        )
+        lastUndoSnapshot = captureUndoSnapshot(currentState)
 
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
         for (r in 0 until shape.height) {
@@ -1378,9 +1427,13 @@ class GameViewModel(
 
         val mutableIce = currentState.iceCells.toMutableMap()
         val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLocked = currentState.lockedCells.toMutableSet()
+        val mutableMystery = currentState.mysteryCells.toMutableSet()
         val mutableLightning = currentState.lightningCells.toMutableSet()
         var gemsCollectedThisMove = 0
         var iceBrokenThisMove = 0
+        var chainsBrokenThisMove = 0
+        var mysteryOpenedThisMove = 0
         var laserExtraPoints = 0
         var lasersTriggeredCount = 0
         var colorMatchLines = 0
@@ -1481,19 +1534,27 @@ class GameViewModel(
             for (coord in clearingCoords) {
                 val r = coord.first
                 val c = coord.second
-                val iceHits = mutableIce[coord] ?: 0
-                if (iceHits > 1) {
-                    // Double-hit frost cracks to 1 layer; block remains until next clear
-                    mutableIce[coord] = iceHits - 1
+                if (mutableLocked.remove(coord)) {
+                    // Chained tiles require a line clear to snap the chain first; underlying block stays
+                    chainsBrokenThisMove++
                 } else {
-                    if (iceHits == 1) {
-                        mutableIce.remove(coord)
-                        iceBrokenThisMove++
+                    val iceHits = mutableIce[coord] ?: 0
+                    if (iceHits > 1) {
+                        // Double-hit frost cracks to 1 layer; block remains until next clear
+                        mutableIce[coord] = iceHits - 1
+                    } else {
+                        if (iceHits == 1) {
+                            mutableIce.remove(coord)
+                            iceBrokenThisMove++
+                        }
+                        if (mutableGems.remove(coord)) {
+                            gemsCollectedThisMove++
+                        }
+                        if (mutableMystery.remove(coord)) {
+                            mysteryOpenedThisMove++
+                        }
+                        newGrid[r][c] = 0
                     }
-                    if (mutableGems.remove(coord)) {
-                        gemsCollectedThisMove++
-                    }
-                    newGrid[r][c] = 0
                 }
             }
 
@@ -1524,6 +1585,11 @@ class GameViewModel(
         }
         val feverJustActivated = newCombo >= 4 && !wasInFever
 
+        val mysteryRewardBanner = if (mysteryOpenedThisMove > 0) {
+            grantMysteryCrateRewards(mysteryOpenedThisMove)
+        } else {
+            null
+        }
         val gemCoinBonus = gemsCollectedThisMove * 5
         val feverCoinBonus = if (wasInFever && totalLines > 0) totalLines * FEVER_COINS_PER_LINE else 0
         val boardClearCoinBonus = if (perfectBoardClear) PERFECT_BOARD_CLEAR_COINS else 0
@@ -1539,10 +1605,12 @@ class GameViewModel(
         val isDaily = currentState.gameMode == GameMode.DAILY_CHALLENGE
         val isTimeAttack = currentState.gameMode == GameMode.TIME_ATTACK
         val isAdventure = currentState.gameMode == GameMode.ADVENTURE
+        val isZen = currentState.gameMode == GameMode.ZEN
         val isNewRecord = when {
             isDaily -> newScore > preferences.getDailyHighScore(currentState.dailyDate)
             isTimeAttack -> newScore > preferences.timeAttackHighScore
             isAdventure -> newScore > preferences.getAdventureHighScore(currentState.adventureLevelNumber)
+            isZen -> newScore > preferences.zenHighScore
             else -> newScore > preferences.highScore
         }
 
@@ -1551,6 +1619,7 @@ class GameViewModel(
                 isDaily -> preferences.setDailyHighScore(currentState.dailyDate, newScore)
                 isTimeAttack -> preferences.timeAttackHighScore = newScore
                 isAdventure -> preferences.setAdventureHighScore(currentState.adventureLevelNumber, newScore)
+                isZen -> preferences.zenHighScore = newScore
                 else -> preferences.highScore = newScore
             }
         }
@@ -1678,12 +1747,14 @@ class GameViewModel(
 
         val totalGemsCollected = currentState.adventureGemsCollected + gemsCollectedThisMove
         val totalIceBroken = currentState.adventureIceBroken + iceBrokenThisMove
+        val totalChainsBroken = currentState.adventureChainsBroken + chainsBrokenThisMove
         val adventureSpec = if (isAdventure) AdventureCatalog.level(currentState.adventureLevelNumber) else null
 
         val adventureCompletedNow = if (adventureSpec != null && !currentState.adventureLevelCompleted) {
             when (adventureSpec.goalType) {
                 AdventureGoalType.COLLECT_GEMS -> totalGemsCollected >= adventureSpec.targetCount
                 AdventureGoalType.BREAK_ICE -> mutableIce.isEmpty()
+                AdventureGoalType.BREAK_CHAINS -> mutableLocked.isEmpty()
                 AdventureGoalType.SCORE_TARGET -> newScore >= adventureSpec.targetCount
             }
         } else {
@@ -1701,7 +1772,12 @@ class GameViewModel(
                 for (r in 0 until 8) {
                     for (c in 0 until 8) {
                         val coord = r to c
-                        if (newGrid[r][c] > 0 && coord !in mutableGems && coord !in mutableIce) {
+                        if (newGrid[r][c] > 0 &&
+                            coord !in mutableGems &&
+                            coord !in mutableIce &&
+                            coord !in mutableLocked &&
+                            coord !in mutableMystery
+                        ) {
                             eligibleCells.add(coord)
                         }
                     }
@@ -1754,6 +1830,8 @@ class GameViewModel(
                     if (newGrid[r][c] > 0 &&
                         coord !in mutableIce &&
                         coord !in mutableGems &&
+                        coord !in mutableLocked &&
+                        coord !in mutableMystery &&
                         coord !in mutableLightning
                     ) {
                         eligibleForLaser.add(coord)
@@ -1766,12 +1844,31 @@ class GameViewModel(
             }
         }
 
+        val frozenGridRaw = newGrid.map { it.toList() }
+        val zenOutcome = if (isZen) {
+            resolveZenRecovery(frozenGridRaw, finalPieces, newScore)
+        } else {
+            null
+        }
+        val frozenGrid = zenOutcome?.grid ?: frozenGridRaw
+        val resolvedPieces = zenOutcome?.pieces ?: finalPieces
+        val zenRescuedBanner = if (zenOutcome?.boardCleared == true) {
+            "🧘 ZEN BREATHE! BOARD REFRESHED"
+        } else if (zenOutcome?.trayRefreshed == true) {
+            "🧘 ZEN TRAY REFRESHED"
+        } else {
+            null
+        }
+
         val boardClearBanner = when {
             perfectBoardClear -> "✨ PERFECT BOARD CLEAR! +$PERFECT_BOARD_CLEAR_POINTS PTS • +$PERFECT_BOARD_CLEAR_COINS 🪙"
+            zenRescuedBanner != null -> zenRescuedBanner
+            mysteryRewardBanner != null -> mysteryRewardBanner
             feverJustActivated -> "🔥 FEVER 2× ACTIVATED! +$totalMovePoints"
             colorMatchLines > 0 -> "🌈 COLOR MATCH! +$totalMovePoints"
             lasersTriggeredCount > 0 -> "⚡ CROSS-LASER BLAST! +$totalMovePoints"
             gemsCollectedThisMove > 0 -> "💎 +$gemsCollectedThisMove GEM${if (gemsCollectedThisMove > 1) "S" else ""} • +${gemCoinBonus} 🪙"
+            chainsBrokenThisMove > 0 -> "⛓️ +$chainsBrokenThisMove CHAIN${if (chainsBrokenThisMove > 1) "S" else ""} BROKEN!"
             spawnedLightningNow -> "⚡ CROSS-LASER CHARGED! +$totalMovePoints"
             else -> null
         }
@@ -1789,8 +1886,11 @@ class GameViewModel(
             )
         }
 
-        val frozenGrid = newGrid.map { it.toList() }
-        val isGameOver = if (adventureCompletedNow) false else checkGameOver(frozenGrid, finalPieces)
+        val isGameOver = when {
+            adventureCompletedNow -> false
+            isZen -> false
+            else -> checkGameOver(frozenGrid, resolvedPieces)
+        }
         val updatedMaxCombo = maxOf(currentState.maxComboSession, newCombo)
         val updatedLines = currentState.linesClearedSession + totalLines
         val updatedAllTimeTotal = if (totalMovePoints > 0) {
@@ -1808,7 +1908,7 @@ class GameViewModel(
         _gameState.update {
             it.copy(
                 grid = frozenGrid,
-                activePieces = finalPieces,
+                activePieces = resolvedPieces,
                 score = newScore,
                 highScore = newHigh,
                 totalAllTimeScore = updatedAllTimeTotal,
@@ -1816,6 +1916,7 @@ class GameViewModel(
                 coinsBalance = preferences.coinsBalance,
                 hammerCount = preferences.hammerCount,
                 rotateCount = preferences.rotateCount,
+                colorBlastCount = preferences.colorBlastCount,
                 comboStreak = if (totalLines > 0) newCombo else 0,
                 comboEventId = if (totalLines > 0) currentState.comboEventId + 1L else currentState.comboEventId,
                 lastClearedLinesCount = totalLines,
@@ -1854,12 +1955,16 @@ class GameViewModel(
                 lightningCells = mutableLightning.toSet(),
                 gemCells = mutableGems.toSet(),
                 iceCells = mutableIce.toMap(),
+                lockedCells = mutableLocked.toSet(),
+                mysteryCells = mutableMystery.toSet(),
                 adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
                 adventureGemsCollected = totalGemsCollected,
                 adventureIceBroken = totalIceBroken,
+                adventureChainsBroken = totalChainsBroken,
                 adventureLevelCompleted = adventureCompletedNow,
                 adventureEarnedStars = adventureStars,
                 adventureLastRewardCoins = adventureRewardCoins,
+                playerTotalStars = computeTotalAdventureStars(),
                 boardClearEventId = if (perfectBoardClear) it.boardClearEventId + 1L else it.boardClearEventId,
                 shakeEventId = if (shouldShake) it.shakeEventId + 1L else it.shakeEventId
             )
@@ -2267,39 +2372,14 @@ class GameViewModel(
         if (cellColor == 0) return false
         hasUserInteractedThisSession = true
 
-        lastUndoSnapshot = UndoSnapshot(
-            grid = currentState.grid,
-            activePieces = currentState.activePieces,
-            score = currentState.score,
-            highScore = currentState.highScore,
-            comboStreak = currentState.comboStreak,
-            maxComboSession = currentState.maxComboSession,
-            linesClearedSession = currentState.linesClearedSession,
-            isGameOver = currentState.isGameOver,
-            isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount,
-            shuffleCount = currentState.shuffleCount,
-            bombCount = currentState.bombCount,
-            rotateCount = currentState.rotateCount,
-            colorBlastCount = currentState.colorBlastCount,
-            feverMovesRemaining = currentState.feverMovesRemaining,
-            gemCells = currentState.gemCells,
-            iceCells = currentState.iceCells,
-            heldPiece = currentState.heldPiece,
-            canHoldThisTurn = currentState.canHoldThisTurn,
-            lightningCells = currentState.lightningCells,
-            adventureGemsCollected = currentState.adventureGemsCollected,
-            adventureIceBroken = currentState.adventureIceBroken,
-            adventureLevelCompleted = currentState.adventureLevelCompleted,
-            timeRemainingMs = currentState.timeRemainingMs,
-            gameOverReason = currentState.gameOverReason
-        )
+        lastUndoSnapshot = captureUndoSnapshot(currentState)
 
         val coord = row to col
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
         val mutableIce = currentState.iceCells.toMutableMap()
         val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLocked = currentState.lockedCells.toMutableSet()
+        val mutableMystery = currentState.mysteryCells.toMutableSet()
         val mutableLightning = currentState.lightningCells.toMutableSet()
 
         val clearedCoords = linkedSetOf(coord)
@@ -2331,6 +2411,8 @@ class GameViewModel(
         val bursts = mutableListOf<LineClearBurst>()
         var gemsAdded = 0
         var iceAdded = 0
+        var chainsAdded = 0
+        var mysteryAdded = 0
         for (cItem in clearedCoords) {
             val r = cItem.first
             val c = cItem.second
@@ -2348,6 +2430,8 @@ class GameViewModel(
             newGrid[r][c] = 0
             if (mutableIce.remove(cItem) != null) iceAdded++
             if (mutableGems.remove(cItem)) gemsAdded++
+            if (mutableLocked.remove(cItem)) chainsAdded++
+            if (mutableMystery.remove(cItem)) mysteryAdded++
         }
 
         val laserBonusPts = if (seenLasers.isNotEmpty()) (clearedCoords.size - 1).coerceAtLeast(0) * 15 else 0
@@ -2355,14 +2439,16 @@ class GameViewModel(
         val nextHigh = maxOf(currentState.highScore, nextScore)
         val frozenGrid = newGrid.map { it.toList() }
 
+        val crateBanner = if (mysteryAdded > 0) grantMysteryCrateRewards(mysteryAdded) else null
         if (gemsAdded > 0) {
             preferences.coinsBalance = preferences.coinsBalance + gemsAdded * 5
             preferences.totalCoinsEarned = preferences.totalCoinsEarned + gemsAdded * 5
         }
         val nextGemsCollected = currentState.adventureGemsCollected + gemsAdded
         val nextIceBroken = currentState.adventureIceBroken + iceAdded
+        val nextChainsBroken = currentState.adventureChainsBroken + chainsAdded
 
-        val newHammerCount = (currentState.hammerCount - 1).coerceAtLeast(0)
+        val newHammerCount = (preferences.hammerCount - 1).coerceAtLeast(0)
         preferences.hammerCount = newHammerCount
 
         if (seenLasers.isNotEmpty()) {
@@ -2376,10 +2462,16 @@ class GameViewModel(
         val adventureDone = evaluateAdventureClearAfterBooster(
             state = currentState.copy(score = nextScore),
             nextIce = mutableIce,
-            nextGemsCollected = nextGemsCollected
+            nextGemsCollected = nextGemsCollected,
+            nextLocked = mutableLocked
         )
-        val stillGameOver = if (adventureDone) false else checkGameOver(frozenGrid, currentState.activePieces)
-        val hammerBanner = if (seenLasers.isNotEmpty()) "⚡ LASER SMASH! +$laserBonusPts PTS" else "BLOCK SMASHED! 🔨"
+        val stillGameOver = if (adventureDone || currentState.gameMode == GameMode.ZEN) {
+            false
+        } else {
+            checkGameOver(frozenGrid, currentState.activePieces)
+        }
+        val hammerBanner = crateBanner
+            ?: if (seenLasers.isNotEmpty()) "⚡ LASER SMASH! +$laserBonusPts PTS" else "BLOCK SMASHED! 🔨"
 
         _gameState.update {
             it.copy(
@@ -2389,15 +2481,21 @@ class GameViewModel(
                 lightningCells = mutableLightning.toSet(),
                 gemCells = mutableGems.toSet(),
                 iceCells = mutableIce.toMap(),
+                lockedCells = mutableLocked.toSet(),
+                mysteryCells = mutableMystery.toSet(),
                 adventureGemsCollected = nextGemsCollected,
                 adventureIceBroken = nextIceBroken,
+                adventureChainsBroken = nextChainsBroken,
                 adventureLevelCompleted = adventureDone || it.adventureLevelCompleted,
                 adventureEarnedStars = if (adventureDone && !it.adventureLevelCompleted) {
                     AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), nextScore)
                 } else it.adventureEarnedStars,
                 adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
+                playerTotalStars = computeTotalAdventureStars(),
                 coinsBalance = preferences.coinsBalance,
                 hammerCount = newHammerCount,
+                rotateCount = preferences.rotateCount,
+                colorBlastCount = preferences.colorBlastCount,
                 isHammerActive = false,
                 isBombActive = false,
                 isRotateActive = false,
@@ -2441,34 +2539,7 @@ class GameViewModel(
         }
 
         hasUserInteractedThisSession = true
-        lastUndoSnapshot = UndoSnapshot(
-            grid = currentState.grid,
-            activePieces = currentState.activePieces,
-            score = currentState.score,
-            highScore = currentState.highScore,
-            comboStreak = currentState.comboStreak,
-            maxComboSession = currentState.maxComboSession,
-            linesClearedSession = currentState.linesClearedSession,
-            isGameOver = currentState.isGameOver,
-            isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount,
-            shuffleCount = currentState.shuffleCount,
-            bombCount = currentState.bombCount,
-            rotateCount = currentState.rotateCount,
-            colorBlastCount = currentState.colorBlastCount,
-            feverMovesRemaining = currentState.feverMovesRemaining,
-            gemCells = currentState.gemCells,
-            iceCells = currentState.iceCells,
-            heldPiece = currentState.heldPiece,
-            canHoldThisTurn = currentState.canHoldThisTurn,
-            lightningCells = currentState.lightningCells,
-            adventureGemsCollected = currentState.adventureGemsCollected,
-            adventureIceBroken = currentState.adventureIceBroken,
-            adventureLevelCompleted = currentState.adventureLevelCompleted,
-            timeRemainingMs = currentState.timeRemainingMs,
-            gameOverReason = currentState.gameOverReason
-        )
+        lastUndoSnapshot = captureUndoSnapshot(currentState)
 
         var nextBatchIndex = currentState.dailyBatchIndex
         var candidateTray: List<BlockShape?> = emptyList()
@@ -2513,7 +2584,7 @@ class GameViewModel(
 
         val nextShuffleCount = (currentState.shuffleCount - 1).coerceAtLeast(0)
         preferences.shuffleCount = nextShuffleCount
-        val stillGameOver = checkGameOver(currentState.grid, candidateTray)
+        val stillGameOver = if (currentState.gameMode == GameMode.ZEN) false else checkGameOver(currentState.grid, candidateTray)
 
         soundManager.playPowerup()
         triggerHaptic(HapticEffect.PowerUp)
@@ -2617,38 +2688,13 @@ class GameViewModel(
         if (bursts.isEmpty()) return false
 
         hasUserInteractedThisSession = true
-        lastUndoSnapshot = UndoSnapshot(
-            grid = currentState.grid,
-            activePieces = currentState.activePieces,
-            score = currentState.score,
-            highScore = currentState.highScore,
-            comboStreak = currentState.comboStreak,
-            maxComboSession = currentState.maxComboSession,
-            linesClearedSession = currentState.linesClearedSession,
-            isGameOver = currentState.isGameOver,
-            isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount,
-            shuffleCount = currentState.shuffleCount,
-            bombCount = currentState.bombCount,
-            rotateCount = currentState.rotateCount,
-            colorBlastCount = currentState.colorBlastCount,
-            feverMovesRemaining = currentState.feverMovesRemaining,
-            gemCells = currentState.gemCells,
-            iceCells = currentState.iceCells,
-            heldPiece = currentState.heldPiece,
-            canHoldThisTurn = currentState.canHoldThisTurn,
-            lightningCells = currentState.lightningCells,
-            adventureGemsCollected = currentState.adventureGemsCollected,
-            adventureIceBroken = currentState.adventureIceBroken,
-            adventureLevelCompleted = currentState.adventureLevelCompleted,
-            timeRemainingMs = currentState.timeRemainingMs,
-            gameOverReason = currentState.gameOverReason
-        )
+        lastUndoSnapshot = captureUndoSnapshot(currentState)
 
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
         val mutableIce = currentState.iceCells.toMutableMap()
         val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLocked = currentState.lockedCells.toMutableSet()
+        val mutableMystery = currentState.mysteryCells.toMutableSet()
         val mutableLightning = currentState.lightningCells.toMutableSet()
 
         val initialBombCoords = bursts.map { it.row to it.col }.toMutableSet()
@@ -2683,6 +2729,8 @@ class GameViewModel(
         val allBursts = mutableListOf<LineClearBurst>()
         var gemsAdded = 0
         var iceAdded = 0
+        var chainsAdded = 0
+        var mysteryAdded = 0
         for (coord in allClearedCoords) {
             val tileColor = newGrid[coord.first][coord.second]
             allBursts.add(
@@ -2698,16 +2746,20 @@ class GameViewModel(
             newGrid[coord.first][coord.second] = 0
             if (mutableIce.remove(coord) != null) iceAdded++
             if (mutableGems.remove(coord)) gemsAdded++
+            if (mutableLocked.remove(coord)) chainsAdded++
+            if (mutableMystery.remove(coord)) mysteryAdded++
         }
         val laserBonusPts = if (seenLasers.isNotEmpty()) (allClearedCoords.size - initialBombCoords.size).coerceAtLeast(0) * 15 else 0
         val nextScore = currentState.score + laserBonusPts
         val nextHigh = maxOf(currentState.highScore, nextScore)
+        val crateBanner = if (mysteryAdded > 0) grantMysteryCrateRewards(mysteryAdded) else null
         if (gemsAdded > 0) {
             preferences.coinsBalance = preferences.coinsBalance + gemsAdded * 5
             preferences.totalCoinsEarned = preferences.totalCoinsEarned + gemsAdded * 5
         }
         val nextGemsCollected = currentState.adventureGemsCollected + gemsAdded
         val nextIceBroken = currentState.adventureIceBroken + iceAdded
+        val nextChainsBroken = currentState.adventureChainsBroken + chainsAdded
         val frozenGrid = newGrid.map { it.toList() }
 
         val newBombCount = (currentState.bombCount - 1).coerceAtLeast(0)
@@ -2719,10 +2771,15 @@ class GameViewModel(
         val adventureDone = evaluateAdventureClearAfterBooster(
             state = currentState.copy(score = nextScore),
             nextIce = mutableIce,
-            nextGemsCollected = nextGemsCollected
+            nextGemsCollected = nextGemsCollected,
+            nextLocked = mutableLocked
         )
-        val stillGameOver = if (adventureDone) false else checkGameOver(frozenGrid, currentState.activePieces)
-        val bombBanner = if (seenLasers.isNotEmpty()) {
+        val stillGameOver = if (adventureDone || currentState.gameMode == GameMode.ZEN) {
+            false
+        } else {
+            checkGameOver(frozenGrid, currentState.activePieces)
+        }
+        val bombBanner = crateBanner ?: if (seenLasers.isNotEmpty()) {
             "💣⚡ LASER BOMB! ${allClearedCoords.size} BLOCKS BLASTED!"
         } else {
             "💣 3×3 BLAST! ${allClearedCoords.size} BLOCKS CLEARED!"
@@ -2736,14 +2793,21 @@ class GameViewModel(
                 lightningCells = mutableLightning.toSet(),
                 gemCells = mutableGems.toSet(),
                 iceCells = mutableIce.toMap(),
+                lockedCells = mutableLocked.toSet(),
+                mysteryCells = mutableMystery.toSet(),
                 adventureGemsCollected = nextGemsCollected,
                 adventureIceBroken = nextIceBroken,
+                adventureChainsBroken = nextChainsBroken,
                 adventureLevelCompleted = adventureDone || it.adventureLevelCompleted,
                 adventureEarnedStars = if (adventureDone && !it.adventureLevelCompleted) {
                     AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), nextScore)
                 } else it.adventureEarnedStars,
                 adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
+                playerTotalStars = computeTotalAdventureStars(),
                 coinsBalance = preferences.coinsBalance,
+                hammerCount = preferences.hammerCount,
+                rotateCount = preferences.rotateCount,
+                colorBlastCount = preferences.colorBlastCount,
                 bombCount = newBombCount,
                 isBombActive = false,
                 isHammerActive = false,
@@ -2958,38 +3022,13 @@ class GameViewModel(
         if (initialColorCoords.isEmpty()) return false
 
         hasUserInteractedThisSession = true
-        lastUndoSnapshot = UndoSnapshot(
-            grid = currentState.grid,
-            activePieces = currentState.activePieces,
-            score = currentState.score,
-            highScore = currentState.highScore,
-            comboStreak = currentState.comboStreak,
-            maxComboSession = currentState.maxComboSession,
-            linesClearedSession = currentState.linesClearedSession,
-            isGameOver = currentState.isGameOver,
-            isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount,
-            shuffleCount = currentState.shuffleCount,
-            bombCount = currentState.bombCount,
-            rotateCount = currentState.rotateCount,
-            colorBlastCount = currentState.colorBlastCount,
-            feverMovesRemaining = currentState.feverMovesRemaining,
-            gemCells = currentState.gemCells,
-            iceCells = currentState.iceCells,
-            heldPiece = currentState.heldPiece,
-            canHoldThisTurn = currentState.canHoldThisTurn,
-            lightningCells = currentState.lightningCells,
-            adventureGemsCollected = currentState.adventureGemsCollected,
-            adventureIceBroken = currentState.adventureIceBroken,
-            adventureLevelCompleted = currentState.adventureLevelCompleted,
-            timeRemainingMs = currentState.timeRemainingMs,
-            gameOverReason = currentState.gameOverReason
-        )
+        lastUndoSnapshot = captureUndoSnapshot(currentState)
 
         val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
         val mutableIce = currentState.iceCells.toMutableMap()
         val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLocked = currentState.lockedCells.toMutableSet()
+        val mutableMystery = currentState.mysteryCells.toMutableSet()
         val mutableLightning = currentState.lightningCells.toMutableSet()
 
         val allClearedCoords = linkedSetOf<Pair<Int, Int>>().apply { addAll(initialColorCoords) }
@@ -3023,6 +3062,8 @@ class GameViewModel(
         val allBursts = mutableListOf<LineClearBurst>()
         var gemsAdded = 0
         var iceAdded = 0
+        var chainsAdded = 0
+        var mysteryAdded = 0
         for (coord in allClearedCoords) {
             val tileColor = newGrid[coord.first][coord.second]
             allBursts.add(
@@ -3038,20 +3079,24 @@ class GameViewModel(
             newGrid[coord.first][coord.second] = 0
             if (mutableIce.remove(coord) != null) iceAdded++
             if (mutableGems.remove(coord)) gemsAdded++
+            if (mutableLocked.remove(coord)) chainsAdded++
+            if (mutableMystery.remove(coord)) mysteryAdded++
         }
 
         val bonusPts = allClearedCoords.size * 15
         val nextScore = currentState.score + bonusPts
         val nextHigh = maxOf(currentState.highScore, nextScore)
+        val crateBanner = if (mysteryAdded > 0) grantMysteryCrateRewards(mysteryAdded) else null
         if (gemsAdded > 0) {
             preferences.coinsBalance = preferences.coinsBalance + gemsAdded * 5
             preferences.totalCoinsEarned = preferences.totalCoinsEarned + gemsAdded * 5
         }
         val nextGemsCollected = currentState.adventureGemsCollected + gemsAdded
         val nextIceBroken = currentState.adventureIceBroken + iceAdded
+        val nextChainsBroken = currentState.adventureChainsBroken + chainsAdded
         val frozenGrid = newGrid.map { it.toList() }
 
-        val newColorBlastCount = (currentState.colorBlastCount - 1).coerceAtLeast(0)
+        val newColorBlastCount = (preferences.colorBlastCount - 1).coerceAtLeast(0)
         preferences.colorBlastCount = newColorBlastCount
 
         soundManager.playComboCheer()
@@ -3060,10 +3105,15 @@ class GameViewModel(
         val adventureDone = evaluateAdventureClearAfterBooster(
             state = currentState.copy(score = nextScore),
             nextIce = mutableIce,
-            nextGemsCollected = nextGemsCollected
+            nextGemsCollected = nextGemsCollected,
+            nextLocked = mutableLocked
         )
-        val stillGameOver = if (adventureDone) false else checkGameOver(frozenGrid, currentState.activePieces)
-        val blastBanner = "🎨 COLOR BLAST! ${allClearedCoords.size} BLOCKS (+$bonusPts PTS)"
+        val stillGameOver = if (adventureDone || currentState.gameMode == GameMode.ZEN) {
+            false
+        } else {
+            checkGameOver(frozenGrid, currentState.activePieces)
+        }
+        val blastBanner = crateBanner ?: "🎨 COLOR BLAST! ${allClearedCoords.size} BLOCKS (+$bonusPts PTS)"
 
         _gameState.update {
             it.copy(
@@ -3073,14 +3123,20 @@ class GameViewModel(
                 lightningCells = mutableLightning.toSet(),
                 gemCells = mutableGems.toSet(),
                 iceCells = mutableIce.toMap(),
+                lockedCells = mutableLocked.toSet(),
+                mysteryCells = mutableMystery.toSet(),
                 adventureGemsCollected = nextGemsCollected,
                 adventureIceBroken = nextIceBroken,
+                adventureChainsBroken = nextChainsBroken,
                 adventureLevelCompleted = adventureDone || it.adventureLevelCompleted,
                 adventureEarnedStars = if (adventureDone && !it.adventureLevelCompleted) {
                     AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), nextScore)
                 } else it.adventureEarnedStars,
                 adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
+                playerTotalStars = computeTotalAdventureStars(),
                 coinsBalance = preferences.coinsBalance,
+                hammerCount = preferences.hammerCount,
+                rotateCount = preferences.rotateCount,
                 colorBlastCount = newColorBlastCount,
                 isColorBlastActive = false,
                 isBombActive = false,
@@ -3199,34 +3255,7 @@ class GameViewModel(
         }
 
         hasUserInteractedThisSession = true
-        lastUndoSnapshot = UndoSnapshot(
-            grid = currentState.grid,
-            activePieces = currentState.activePieces,
-            score = currentState.score,
-            highScore = currentState.highScore,
-            comboStreak = currentState.comboStreak,
-            maxComboSession = currentState.maxComboSession,
-            linesClearedSession = currentState.linesClearedSession,
-            isGameOver = currentState.isGameOver,
-            isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount,
-            shuffleCount = currentState.shuffleCount,
-            bombCount = currentState.bombCount,
-            rotateCount = currentState.rotateCount,
-            colorBlastCount = currentState.colorBlastCount,
-            feverMovesRemaining = currentState.feverMovesRemaining,
-            gemCells = currentState.gemCells,
-            iceCells = currentState.iceCells,
-            heldPiece = currentState.heldPiece,
-            canHoldThisTurn = currentState.canHoldThisTurn,
-            lightningCells = currentState.lightningCells,
-            adventureGemsCollected = currentState.adventureGemsCollected,
-            adventureIceBroken = currentState.adventureIceBroken,
-            adventureLevelCompleted = currentState.adventureLevelCompleted,
-            timeRemainingMs = currentState.timeRemainingMs,
-            gameOverReason = currentState.gameOverReason
-        )
+        lastUndoSnapshot = captureUndoSnapshot(currentState)
 
         val rotatedShape = shape.rotate90Clockwise()
         val updatedTray = currentState.activePieces.toMutableList()
@@ -3269,13 +3298,15 @@ class GameViewModel(
     private fun evaluateAdventureClearAfterBooster(
         state: GameState,
         nextIce: Map<Pair<Int, Int>, Int>,
-        nextGemsCollected: Int
+        nextGemsCollected: Int,
+        nextLocked: Set<Pair<Int, Int>> = state.lockedCells
     ): Boolean {
         if (state.gameMode != GameMode.ADVENTURE || state.adventureLevelCompleted) return false
         val spec = AdventureCatalog.level(state.adventureLevelNumber)
         val cleared = when (spec.goalType) {
             AdventureGoalType.COLLECT_GEMS -> nextGemsCollected >= spec.targetCount
             AdventureGoalType.BREAK_ICE -> nextIce.isEmpty()
+            AdventureGoalType.BREAK_CHAINS -> nextLocked.isEmpty()
             AdventureGoalType.SCORE_TARGET -> state.score >= spec.targetCount
         }
         if (cleared) {
@@ -3964,34 +3995,7 @@ class GameViewModel(
         }
 
         hasUserInteractedThisSession = true
-        lastUndoSnapshot = UndoSnapshot(
-            grid = currentState.grid,
-            activePieces = currentState.activePieces,
-            score = currentState.score,
-            highScore = currentState.highScore,
-            comboStreak = currentState.comboStreak,
-            maxComboSession = currentState.maxComboSession,
-            linesClearedSession = currentState.linesClearedSession,
-            isGameOver = currentState.isGameOver,
-            isNewHighScore = currentState.isNewHighScore,
-            dailyBatchIndex = currentState.dailyBatchIndex,
-            hammerCount = currentState.hammerCount,
-            shuffleCount = currentState.shuffleCount,
-            bombCount = currentState.bombCount,
-            rotateCount = currentState.rotateCount,
-            colorBlastCount = currentState.colorBlastCount,
-            feverMovesRemaining = currentState.feverMovesRemaining,
-            gemCells = currentState.gemCells,
-            iceCells = currentState.iceCells,
-            heldPiece = currentState.heldPiece,
-            canHoldThisTurn = currentState.canHoldThisTurn,
-            lightningCells = currentState.lightningCells,
-            adventureGemsCollected = currentState.adventureGemsCollected,
-            adventureIceBroken = currentState.adventureIceBroken,
-            adventureLevelCompleted = currentState.adventureLevelCompleted,
-            timeRemainingMs = currentState.timeRemainingMs,
-            gameOverReason = currentState.gameOverReason
-        )
+        lastUndoSnapshot = captureUndoSnapshot(currentState)
 
         var nextBatchIndex = currentState.dailyBatchIndex
         val finalTray = if (nextTrayCandidate.all { it == null }) {
@@ -4005,7 +4009,7 @@ class GameViewModel(
             nextTrayCandidate.toList()
         }
 
-        val nextGameOver = checkGameOver(currentState.grid, finalTray)
+        val nextGameOver = if (currentState.gameMode == GameMode.ZEN) false else checkGameOver(currentState.grid, finalTray)
         soundManager.playPickup()
         triggerHaptic(HapticEffect.Pickup)
 
@@ -4136,6 +4140,211 @@ class GameViewModel(
 
     fun clearLastSpinReward() {
         _gameState.update { it.copy(lastSpinReward = null) }
+    }
+
+    private data class ZenRecoveryOutcome(
+        val grid: List<List<Int>>,
+        val pieces: List<BlockShape?>,
+        val trayRefreshed: Boolean = false,
+        val boardCleared: Boolean = false
+    )
+
+    private fun resolveZenRecovery(
+        grid: List<List<Int>>,
+        currentPieces: List<BlockShape?>,
+        currentScore: Int
+    ): ZenRecoveryOutcome {
+        if (!checkGameOver(grid, currentPieces)) {
+            return ZenRecoveryOutcome(grid = grid, pieces = currentPieces)
+        }
+
+        // 1. Try fresh shape batch for remaining active slots
+        repeat(6) {
+            val freshBatch = ShapeDefinitions.getRandomShapeBatch(currentScore = currentScore)
+            val candidate = currentPieces.mapIndexed { idx, existing ->
+                if (existing != null) freshBatch.getOrNull(idx) ?: freshBatch.first() else null
+            }
+            if (!checkGameOver(grid, candidate)) {
+                return ZenRecoveryOutcome(grid = grid, pieces = candidate, trayRefreshed = true)
+            }
+        }
+
+        // 2. Try swapping in a guaranteed fitting shape
+        val fittingShape = ShapeDefinitions.getAvailableSpecsForScore(currentScore)
+            .map { it.toBlockShape() }
+            .firstOrNull { canFitAnywhere(grid, it) }
+            ?: ShapeDefinitions.getAvailableSpecsForScore(0)
+                .map { it.toBlockShape() }
+                .firstOrNull { canFitAnywhere(grid, it) }
+        if (fittingShape != null) {
+            val idx = currentPieces.indexOfFirst { it != null }.coerceAtLeast(0)
+            val mutable = currentPieces.toMutableList()
+            while (mutable.size <= idx) mutable.add(null)
+            mutable[idx] = fittingShape
+            return ZenRecoveryOutcome(grid = grid, pieces = mutable.toList(), trayRefreshed = true)
+        }
+
+        // 3. Board is too packed for any shape -> gently clear center 3x3 (and bottom rows if needed)
+        val rescuedGrid = grid.map { it.toMutableList() }.toMutableList()
+        for (r in 2..4) {
+            for (c in 2..4) {
+                rescuedGrid[r][c] = 0
+            }
+        }
+        var frozenRescued = rescuedGrid.map { it.toList() }
+        if (checkGameOver(frozenRescued, currentPieces)) {
+            val freshBatch = ShapeDefinitions.getRandomShapeBatch(currentScore = 0)
+            val candidate = currentPieces.mapIndexed { idx, existing ->
+                if (existing != null) freshBatch.getOrNull(idx) ?: freshBatch.first() else null
+            }
+            if (!checkGameOver(frozenRescued, candidate)) {
+                return ZenRecoveryOutcome(
+                    grid = frozenRescued,
+                    pieces = candidate,
+                    trayRefreshed = true,
+                    boardCleared = true
+                )
+            }
+            for (c in 0 until 8) {
+                rescuedGrid[6][c] = 0
+                rescuedGrid[7][c] = 0
+            }
+            frozenRescued = rescuedGrid.map { it.toList() }
+            val fallbackBatch = ShapeDefinitions.getRandomShapeBatch(currentScore = 0)
+            return ZenRecoveryOutcome(
+                grid = frozenRescued,
+                pieces = currentPieces.mapIndexed { idx, existing ->
+                    if (existing != null) fallbackBatch.getOrNull(idx) ?: fallbackBatch.first() else null
+                },
+                trayRefreshed = true,
+                boardCleared = true
+            )
+        }
+        return ZenRecoveryOutcome(
+            grid = frozenRescued,
+            pieces = currentPieces,
+            boardCleared = true
+        )
+    }
+
+    fun refreshZenTray(): Boolean {
+        val currentState = _gameState.value
+        if (currentState.gameMode != GameMode.ZEN) return false
+        var resolvedPieces = currentState.activePieces
+        var rescuedGrid = currentState.grid
+        var clearedBoard = false
+
+        repeat(6) {
+            val freshBatch = ShapeDefinitions.getRandomShapeBatch(currentScore = currentState.score)
+            val candidate = currentState.activePieces.mapIndexed { idx, existing ->
+                if (existing != null) freshBatch.getOrNull(idx) ?: freshBatch.first() else null
+            }
+            if (!checkGameOver(currentState.grid, candidate)) {
+                resolvedPieces = candidate
+                return@repeat
+            }
+        }
+        if (checkGameOver(rescuedGrid, resolvedPieces)) {
+            val outcome = resolveZenRecovery(rescuedGrid, resolvedPieces, currentState.score)
+            rescuedGrid = outcome.grid
+            resolvedPieces = outcome.pieces
+            clearedBoard = outcome.boardCleared
+        }
+
+        soundManager.playPickup()
+        triggerHaptic(HapticEffect.Pickup)
+        val banner = if (clearedBoard) "🧘 ZEN BREATHE! BOARD REFRESHED" else "🧘 ZEN TRAY REFRESHED"
+        _gameState.update {
+            it.copy(
+                grid = rescuedGrid,
+                activePieces = resolvedPieces,
+                isGameOver = false,
+                selectedShapeIndex = null,
+                hoverRow = null,
+                hoverCol = null,
+                hoverPreviewCells = emptySet(),
+                comboBannerText = banner
+            )
+        }
+        flushSession(syncToCloud = false)
+        viewModelScope.launch {
+            delay(1300)
+            _gameState.update {
+                if (it.comboBannerText == banner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    private fun grantMysteryCrateRewards(openedCount: Int): String {
+        val totalCoins = openedCount * 25
+        preferences.coinsBalance = preferences.coinsBalance + totalCoins
+        preferences.totalCoinsEarned = preferences.totalCoinsEarned + totalCoins
+        val baseIdx = (preferences.totalCoinsEarned / 25).coerceAtLeast(0)
+        var addedHammers = 0
+        var addedBlasts = 0
+        var addedRotates = 0
+        for (i in 0 until openedCount) {
+            when ((baseIdx + i) % 3) {
+                0 -> {
+                    preferences.hammerCount = preferences.hammerCount + 1
+                    addedHammers++
+                }
+                1 -> {
+                    preferences.colorBlastCount = preferences.colorBlastCount + 1
+                    addedBlasts++
+                }
+                else -> {
+                    preferences.rotateCount = preferences.rotateCount + 1
+                    addedRotates++
+                }
+            }
+        }
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+        val boosterSummary = buildList {
+            if (addedHammers > 0) add("+$addedHammers 🔨")
+            if (addedBlasts > 0) add("+$addedBlasts 🎨")
+            if (addedRotates > 0) add("+$addedRotates ↻")
+        }.joinToString(" ")
+        return "🎁 MYSTERY CRATE! +$totalCoins 🪙 $boosterSummary".trim()
+    }
+
+    fun setDailyRemindersEnabled(enabled: Boolean) {
+        preferences.isDailyRemindersEnabled = enabled
+        if (enabled) {
+            DailyReminderScheduler.scheduleDailyReminder(context)
+        } else {
+            DailyReminderScheduler.cancelDailyReminder(context)
+        }
+        _gameState.update { it.copy(isDailyRemindersEnabled = enabled) }
+        showTemporaryBanner(
+            if (enabled) "🔔 DAILY REMINDERS ON" else "🔕 DAILY REMINDERS OFF"
+        )
+    }
+
+    fun selectAvatarBadge(avatarId: String): Boolean {
+        val spec = PlayerAvatarCatalog.byId(avatarId)
+        val state = _gameState.value
+        val currentRank = RankTierCatalog.fromProgress(
+            totalScore = state.totalAllTimeScore,
+            bestScore = maxOf(state.playerOverallBestScore, state.highScore)
+        )
+        val totalStars = computeTotalAdventureStars()
+        if (!spec.isUnlocked(currentRank, totalStars)) {
+            showTemporaryBanner("UNLOCK AT ${spec.unlockRequirementLabel().uppercase()}")
+            return false
+        }
+        preferences.selectedAvatarId = spec.id
+        soundManager.playPickup()
+        triggerHaptic(HapticEffect.Pickup)
+        _gameState.update {
+            it.copy(
+                selectedAvatarId = spec.id,
+                playerTotalStars = totalStars
+            )
+        }
+        return true
     }
 
     fun showTemporaryBanner(message: String) {

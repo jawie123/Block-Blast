@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 enum class AdventureGoalType {
     COLLECT_GEMS,
     BREAK_ICE,
+    BREAK_CHAINS,
     SCORE_TARGET
 }
 
@@ -23,14 +24,16 @@ data class AdventureLevelSpec(
     val threeStarScore: Int,
     val initialGrid: List<List<Int>>,
     val initialIceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
-    val initialGemCells: Set<Pair<Int, Int>> = emptySet()
+    val initialGemCells: Set<Pair<Int, Int>> = emptySet(),
+    val initialLockedCells: Set<Pair<Int, Int>> = emptySet(),
+    val initialMysteryCells: Set<Pair<Int, Int>> = emptySet()
 )
 
 object AdventureCatalog {
 
     val allLevels: List<AdventureLevelSpec> by lazy { buildLevels() }
 
-    val totalLevels: Int get() = 20
+    val totalLevels: Int get() = 30
 
     fun level(levelNumber: Int): AdventureLevelSpec {
         val clamped = levelNumber.coerceIn(1, totalLevels)
@@ -393,6 +396,178 @@ object AdventureCatalog {
                     ".8.GG.8.",
                     "G.I..I.G"
                 )
+            ),
+
+            // Chapter 5: Astral Citadel (Levels 21-30) with Chained Tiles (L) & Mystery Crates (M)
+            buildLevel(
+                num = 21, chapter = 5, chapterTitle = "Astral Citadel", title = "Iron Gate",
+                goalType = AdventureGoalType.BREAK_CHAINS, targetCount = 4,
+                coinReward = 175, hammerReward = 1, rotateReward = 1,
+                twoStar = 2400, threeStar = 3600,
+                iceHits = 1,
+                pattern = listOf(
+                    "........",
+                    ".L..M..L",
+                    "..2..2..",
+                    "........",
+                    "........",
+                    "..5..5..",
+                    ".L..M..L",
+                    "........"
+                )
+            ),
+            buildLevel(
+                num = 22, chapter = 5, chapterTitle = "Astral Citadel", title = "Starlit Crates",
+                goalType = AdventureGoalType.COLLECT_GEMS, targetCount = 10,
+                coinReward = 185, hammerReward = 0, rotateReward = 2,
+                twoStar = 2800, threeStar = 4200,
+                iceHits = 2,
+                pattern = listOf(
+                    "G..MM..G",
+                    ".L....L.",
+                    "..3..3..",
+                    "G..44..G",
+                    "G..55..G",
+                    "..6..6..",
+                    ".L....L.",
+                    "G..MM..G"
+                )
+            ),
+            buildLevel(
+                num = 23, chapter = 5, chapterTitle = "Astral Citadel", title = "Chainbreaker",
+                goalType = AdventureGoalType.BREAK_CHAINS, targetCount = 6,
+                coinReward = 195, hammerReward = 1, rotateReward = 1,
+                twoStar = 3000, threeStar = 4400,
+                iceHits = 2,
+                pattern = listOf(
+                    "L......L",
+                    ".2.MM.2.",
+                    "..L..L..",
+                    "...66...",
+                    "...66...",
+                    "..L..L..",
+                    ".4....4.",
+                    "........"
+                )
+            ),
+            buildLevel(
+                num = 24, chapter = 5, chapterTitle = "Astral Citadel", title = "Nebula Vault",
+                goalType = AdventureGoalType.SCORE_TARGET, targetCount = 4800,
+                coinReward = 210, hammerReward = 1, rotateReward = 2,
+                twoStar = 5800, threeStar = 7400,
+                iceHits = 2,
+                pattern = listOf(
+                    "M.1..1.M",
+                    ".L....L.",
+                    "..I..I..",
+                    "3..77..3",
+                    "4..77..4",
+                    "..I..I..",
+                    ".L....L.",
+                    "M.5..5.M"
+                )
+            ),
+            buildLevel(
+                num = 25, chapter = 5, chapterTitle = "Astral Citadel", title = "Frost & Iron",
+                goalType = AdventureGoalType.BREAK_ICE, targetCount = 8,
+                coinReward = 220, hammerReward = 2, rotateReward = 1,
+                twoStar = 3500, threeStar = 5000,
+                iceHits = 2,
+                pattern = listOf(
+                    "I.L..L.I",
+                    ".M....M.",
+                    "I..22..I",
+                    "..5..5..",
+                    "..6..6..",
+                    "I..33..I",
+                    ".M....M.",
+                    "I.L..L.I"
+                )
+            ),
+            buildLevel(
+                num = 26, chapter = 5, chapterTitle = "Astral Citadel", title = "Celestial Lock",
+                goalType = AdventureGoalType.BREAK_CHAINS, targetCount = 8,
+                coinReward = 230, hammerReward = 1, rotateReward = 2,
+                twoStar = 3800, threeStar = 5400,
+                iceHits = 2,
+                pattern = listOf(
+                    "L..22..L",
+                    ".M....M.",
+                    "L.I..I.L",
+                    "...88...",
+                    "...88...",
+                    "L.I..I.L",
+                    ".M....M.",
+                    "L..33..L"
+                )
+            ),
+            buildLevel(
+                num = 27, chapter = 5, chapterTitle = "Astral Citadel", title = "Comet Treasures",
+                goalType = AdventureGoalType.COLLECT_GEMS, targetCount = 14,
+                coinReward = 245, hammerReward = 1, rotateReward = 2,
+                twoStar = 4200, threeStar = 5900,
+                iceHits = 2,
+                pattern = listOf(
+                    "G.M..M.G",
+                    ".L.33.L.",
+                    "G..44..G",
+                    ".G....G.",
+                    ".G....G.",
+                    "G..55..G",
+                    ".L.66.L.",
+                    "G.M..M.G"
+                )
+            ),
+            buildLevel(
+                num = 28, chapter = 5, chapterTitle = "Astral Citadel", title = "Astral Siege",
+                goalType = AdventureGoalType.BREAK_CHAINS, targetCount = 10,
+                coinReward = 260, hammerReward = 2, rotateReward = 2,
+                twoStar = 4500, threeStar = 6400,
+                iceHits = 2,
+                pattern = listOf(
+                    "L.1..1.L",
+                    ".L.MM.L.",
+                    "3..LL..3",
+                    "..I..I..",
+                    "..I..I..",
+                    "4..LL..4",
+                    ".L.MM.L.",
+                    "L.5..5.L"
+                )
+            ),
+            buildLevel(
+                num = 29, chapter = 5, chapterTitle = "Astral Citadel", title = "Citadel Ascent",
+                goalType = AdventureGoalType.SCORE_TARGET, targetCount = 5800,
+                coinReward = 280, hammerReward = 2, rotateReward = 2,
+                twoStar = 7000, threeStar = 8800,
+                iceHits = 2,
+                pattern = listOf(
+                    "M.L..L.M",
+                    ".2.II.2.",
+                    "L..66..L",
+                    ".5.MM.5.",
+                    ".7.MM.7.",
+                    "L..88..L",
+                    ".3.II.3.",
+                    "M.L..L.M"
+                )
+            ),
+            buildLevel(
+                num = 30, chapter = 5, chapterTitle = "Astral Citadel", title = "Astral Sovereign",
+                goalType = AdventureGoalType.BREAK_CHAINS, targetCount = 12,
+                coinReward = 400, hammerReward = 3, rotateReward = 3,
+                twoStar = 5500, threeStar = 7800,
+                iceHits = 2,
+                pattern = listOf(
+                    "L.M..M.L",
+                    ".L.II.L.",
+                    "M.L..L.M",
+                    ".G.88.G.",
+                    ".G.88.G.",
+                    "M.L..L.M",
+                    ".L.II.L.",
+                    "L.M..M.L"
+                )
             )
         )
     }
@@ -414,6 +589,8 @@ object AdventureCatalog {
     ): AdventureLevelSpec {
         val iceMap = mutableMapOf<Pair<Int, Int>, Int>()
         val gemSet = mutableSetOf<Pair<Int, Int>>()
+        val lockedSet = mutableSetOf<Pair<Int, Int>>()
+        val mysterySet = mutableSetOf<Pair<Int, Int>>()
         val grid = List(8) { r ->
             val rowStr = pattern.getOrElse(r) { "........" }
             List(8) { c ->
@@ -426,6 +603,14 @@ object AdventureCatalog {
                     'I' -> {
                         iceMap[r to c] = iceHits.coerceIn(1, 2)
                         5 // Ice-bound cyan crystal block
+                    }
+                    'L' -> {
+                        lockedSet.add(r to c)
+                        ((r * 2 + c + num) % 6) + 1
+                    }
+                    'M' -> {
+                        mysterySet.add(r to c)
+                        ((r + c * 2 + num) % 6) + 1
                     }
                     in '1'..'8' -> ch.digitToInt()
                     else -> 0
@@ -446,14 +631,16 @@ object AdventureCatalog {
             threeStarScore = threeStar,
             initialGrid = grid,
             initialIceCells = iceMap,
-            initialGemCells = gemSet
+            initialGemCells = gemSet,
+            initialLockedCells = lockedSet,
+            initialMysteryCells = mysterySet
         )
     }
 }
 
 object AdventureStarChest {
     const val STARS_PER_CHEST = 10
-    const val MAX_CHESTS = 6
+    const val MAX_CHESTS = 9
     const val COINS_REWARD = 100
     const val HAMMER_REWARD = 1
     const val COLOR_BLAST_REWARD = 1

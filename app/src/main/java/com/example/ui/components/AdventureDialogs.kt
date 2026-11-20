@@ -100,7 +100,7 @@ fun AdventureLevelsDialog(
                             fontWeight = FontWeight.Black
                         )
                         Text(
-                            text = "Break Ice ❄️ & Collect Gems 💎 across 20 stages",
+                            text = "Break Ice ❄️, Shatter Chains ⛓️ & Open Crates 🎁 across 30 stages",
                             fontSize = 11.sp,
                             color = Color(0xFF9BA8C2)
                         )
@@ -229,7 +229,8 @@ fun AdventureLevelsDialog(
                             1 -> Color(0xFF00E5FF)
                             2 -> Color(0xFF4FC3F7)
                             3 -> Color(0xFFE040FB)
-                            else -> GoldAccent
+                            4 -> GoldAccent
+                            else -> Color(0xFFFF9100)
                         }
 
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -298,6 +299,7 @@ private fun AdventureLevelCard(
     val goalSummary = when (spec.goalType) {
         AdventureGoalType.COLLECT_GEMS -> "💎 Collect ${spec.targetCount} Gems"
         AdventureGoalType.BREAK_ICE -> "❄️ Break ${spec.targetCount} Ice"
+        AdventureGoalType.BREAK_CHAINS -> "⛓️ Break ${spec.targetCount} Chains"
         AdventureGoalType.SCORE_TARGET -> "🎯 Score ${spec.targetCount}+"
     }
 

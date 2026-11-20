@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Settings
@@ -86,6 +88,8 @@ fun SettingsDialog(
     onToggleMusic: () -> Unit,
     onToggleSound: () -> Unit,
     onToggleHaptics: () -> Unit,
+    isDailyRemindersEnabled: Boolean = false,
+    onToggleReminders: () -> Unit = {},
     onShowPrivacyOptions: () -> Unit = {},
     onOpenTutorial: () -> Unit = {},
     onDismiss: () -> Unit
@@ -227,6 +231,24 @@ fun SettingsDialog(
                         rowTag = "settings_haptics_row",
                         switchTag = "settings_haptics_switch",
                         onToggle = onToggleHaptics
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Opt-in Daily Streak & Spin Reminders Toggle Row
+                    SettingsToggleRow(
+                        title = stringResource(R.string.settings_reminders_label),
+                        subtitle = stringResource(R.string.settings_reminders_desc),
+                        checked = isDailyRemindersEnabled,
+                        icon = if (isDailyRemindersEnabled) {
+                            Icons.Default.NotificationsActive
+                        } else {
+                            Icons.Default.NotificationsOff
+                        },
+                        accentColor = Color(0xFF00E676),
+                        rowTag = "settings_reminders_row",
+                        switchTag = "settings_reminders_switch",
+                        onToggle = onToggleReminders
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
