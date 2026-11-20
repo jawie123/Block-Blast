@@ -53,6 +53,12 @@ enum class ShopBoosterType(
         emoji = "↻",
         description = "Rotate any tray piece 90° to fit",
         coinCost = 30
+    ),
+    COLOR_BLAST(
+        title = "Color Blast",
+        emoji = "🎨",
+        description = "Blast all blocks of one color on the board",
+        coinCost = 65
     )
 }
 

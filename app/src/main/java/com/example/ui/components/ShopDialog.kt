@@ -71,6 +71,7 @@ fun ShopDialog(
     shuffleCount: Int,
     bombCount: Int,
     rotateCount: Int = 0,
+    colorBlastCount: Int = 1,
     isRewardedAdReady: Boolean = false,
     isRewardedAdLoading: Boolean = false,
     isAdShowing: Boolean = false,
@@ -219,6 +220,7 @@ fun ShopDialog(
                                 ShopBoosterType.SHUFFLE -> shuffleCount
                                 ShopBoosterType.BOMB -> bombCount
                                 ShopBoosterType.ROTATE -> rotateCount
+                                ShopBoosterType.COLOR_BLAST -> colorBlastCount
                             }
                             BoosterShopCard(
                                 booster = booster,

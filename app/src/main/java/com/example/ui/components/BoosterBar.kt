@@ -49,17 +49,20 @@ fun BoosterBar(
     rotateCount: Int = 3,
     isRotateActive: Boolean = false,
     onRotate: () -> Unit = {},
+    colorBlastCount: Int = 1,
+    isColorBlastActive: Boolean = false,
+    onToggleColorBlast: () -> Unit = {},
     compactMode: Boolean = false,
     theme: BoardThemeSpec = BoardThemeCatalog.defaultTheme,
     modifier: Modifier = Modifier
 ) {
-    val barHeight = if (compactMode) 40.dp else 46.dp
+    val barHeight = if (compactMode) 42.dp else 48.dp
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = if (compactMode) 1.dp else 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 10.dp, vertical = if (compactMode) 1.dp else 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 1. Hammer
@@ -142,21 +145,37 @@ fun BoosterBar(
             modifier = Modifier.weight(1f)
         )
 
-        // 6. Coin & Theme Shop
+        // 6. Color Blast
+        BoosterPill(
+            emoji = "🎨",
+            badgeText = if (isColorBlastActive) "ON" else "$colorBlastCount",
+            isActive = isColorBlastActive,
+            hasInventory = colorBlastCount > 0,
+            activeGradient = listOf(Color(0xFFE040FB), Color(0xFFFF4081)),
+            accentColor = Color(0xFFF48FB1),
+            contentDesc = "Color Blast Booster, $colorBlastCount remaining",
+            testTag = "color_blast_powerup_button",
+            barHeight = barHeight,
+            theme = theme,
+            onClick = onToggleColorBlast,
+            modifier = Modifier.weight(1f)
+        )
+
+        // 7. Coin & Theme Shop
         Box(
             modifier = Modifier
-                .weight(1.22f)
+                .weight(1.18f)
                 .height(barHeight)
-                .clip(RoundedCornerShape(11.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(
                     Brush.horizontalGradient(
                         listOf(Color(0xFF2B2210), Color(0xFF231736))
                     )
                 )
-                .border(1.2.dp, Color(0xFFFFD700).copy(alpha = 0.72f), RoundedCornerShape(11.dp))
+                .border(1.2.dp, Color(0xFFFFD700).copy(alpha = 0.72f), RoundedCornerShape(10.dp))
                 .clickable(role = Role.Button, onClick = onOpenShop)
                 .semantics { contentDescription = "Open Theme and Booster Shop, $coinsBalance coins" }
-                .padding(horizontal = 4.dp)
+                .padding(horizontal = 2.dp)
                 .testTag("shop_open_button"),
             contentAlignment = Alignment.Center
         ) {
@@ -166,11 +185,11 @@ fun BoosterBar(
             ) {
                 Text(
                     text = "🛍️",
-                    fontSize = 11.sp
+                    fontSize = 10.sp
                 )
                 Text(
                     text = "SHOP",
-                    fontSize = 9.sp,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.Black,
                     color = Color(0xFFFFD700),
                     maxLines = 1,
@@ -199,7 +218,7 @@ private fun BoosterPill(
     Box(
         modifier = modifier
             .height(barHeight)
-            .clip(RoundedCornerShape(11.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(
                 if (isActive) {
                     Brush.horizontalGradient(activeGradient)
@@ -216,25 +235,25 @@ private fun BoosterPill(
                     hasInventory -> accentColor.copy(alpha = 0.65f)
                     else -> theme.boardBorder
                 },
-                shape = RoundedCornerShape(11.dp)
+                shape = RoundedCornerShape(10.dp)
             )
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = contentDesc }
-            .padding(horizontal = 4.dp)
+            .padding(horizontal = 2.dp)
             .testTag(testTag),
         contentAlignment = Alignment.Center
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
                 text = emoji,
-                fontSize = 13.sp
+                fontSize = 12.sp
             )
             Text(
                 text = badgeText,
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Black,
                 color = when {
                     isActive -> Color(0xFF0F111E)

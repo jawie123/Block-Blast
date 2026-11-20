@@ -450,3 +450,21 @@ object AdventureCatalog {
         )
     }
 }
+
+object AdventureStarChest {
+    const val STARS_PER_CHEST = 10
+    const val MAX_CHESTS = 6
+    const val COINS_REWARD = 100
+    const val HAMMER_REWARD = 1
+    const val COLOR_BLAST_REWARD = 1
+
+    fun nextChestTarget(claimedCount: Int): Int? {
+        if (claimedCount >= MAX_CHESTS) return null
+        return (claimedCount + 1) * STARS_PER_CHEST
+    }
+
+    fun hasClaimableChest(totalStars: Int, claimedCount: Int): Boolean {
+        val target = nextChestTarget(claimedCount) ?: return false
+        return totalStars >= target
+    }
+}

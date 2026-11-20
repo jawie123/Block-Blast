@@ -91,6 +91,7 @@ fun GameOverDialog(
     onWatchAdForHammer: () -> Unit = {},
     onShowLeaderboard: () -> Unit = {},
     onShowGlobalLeaderboard: () -> Unit = onShowLeaderboard,
+    onShareScore: () -> Unit = {},
     onRestart: () -> Unit
 ) {
     val isTimeUp = gameOverReason == GameOverReason.TIME_UP
@@ -608,6 +609,26 @@ fun GameOverDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
                 }
+
+                // Share Score Card Button
+                OutlinedButton(
+                    onClick = onShareScore,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("share_score_button"),
+                    shape = RoundedCornerShape(14.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFF00E676)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E676))
+                ) {
+                    Text(
+                        text = "📤 SHARE SCORE",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Restart New Game Button
                 Button(

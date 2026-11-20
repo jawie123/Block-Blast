@@ -47,6 +47,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.model.AdventureCatalog
 import com.example.model.AdventureGoalType
 import com.example.model.AdventureLevelSpec
+import com.example.model.AdventureStarChest
 import com.example.ui.theme.BoardBackground
 import com.example.ui.theme.BoardBorder
 import com.example.ui.theme.GoldAccent
@@ -57,10 +58,14 @@ fun AdventureLevelsDialog(
     maxUnlockedLevel: Int,
     getLevelStars: (Int) -> Int,
     onSelectLevel: (Int) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    claimedStarChestsCount: Int = 0,
+    onClaimStarChest: () -> Unit = {}
 ) {
     val totalStars = (1..AdventureCatalog.totalLevels).sumOf { getLevelStars(it) }
     val maxStars = AdventureCatalog.totalLevels * 3
+    val nextChestTarget = AdventureStarChest.nextChestTarget(claimedStarChestsCount)
+    val canClaimChest = AdventureStarChest.hasClaimableChest(totalStars, claimedStarChestsCount)
     val chapters = AdventureCatalog.allLevels.groupBy { it.chapter }
 
     Dialog(
@@ -137,7 +142,79 @@ fun AdventureLevelsDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Star Chest Milestone Reward Banner
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (canClaimChest) {
+                                Brush.horizontalGradient(listOf(Color(0xFF33260C), Color(0xFF281838)))
+                            } else {
+                                Brush.horizontalGradient(listOf(Color(0xFF13192C), Color(0xFF111626)))
+                            }
+                        )
+                        .border(
+                            width = if (canClaimChest) 1.5.dp else 1.dp,
+                            color = if (canClaimChest) GoldAccent else BoardBorder,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(text = "🎁", fontSize = 22.sp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (nextChestTarget != null) {
+                                "STAR CHEST (${claimedStarChestsCount}/${AdventureStarChest.MAX_CHESTS}) • $totalStars/$nextChestTarget ⭐"
+                            } else {
+                                "ALL ${AdventureStarChest.MAX_CHESTS} STAR CHESTS CLAIMED!"
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (canClaimChest) GoldAccent else Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "+${AdventureStarChest.COINS_REWARD} 🪙  +${AdventureStarChest.HAMMER_REWARD} 🔨  +${AdventureStarChest.COLOR_BLAST_REWARD} 🎨",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF9BA8C2)
+                        )
+                    }
+                    Button(
+                        onClick = onClaimStarChest,
+                        enabled = canClaimChest,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("adventure_star_chest_button"),
+                        shape = RoundedCornerShape(9.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GoldAccent,
+                            disabledContainerColor = Color(0xFF1F253B)
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            text = when {
+                                canClaimChest -> "CLAIM!"
+                                nextChestTarget == null -> "DONE"
+                                else -> "LOCKED"
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (canClaimChest) Color(0xFF0F111E) else Color(0xFF7D89A3),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Column(
                     modifier = Modifier
@@ -341,7 +418,8 @@ fun AdventureLevelCompleteDialog(
     hasNextLevel: Boolean,
     onNextLevel: () -> Unit,
     onOpenMap: () -> Unit,
-    onReplay: () -> Unit
+    onReplay: () -> Unit,
+    onShareResult: (() -> Unit)? = null
 ) {
     Dialog(
         onDismissRequest = onReplay,
@@ -512,6 +590,25 @@ fun AdventureLevelCompleteDialog(
                             fontSize = 12.sp,
                             maxLines = 1,
                             softWrap = false
+                        )
+                    }
+                }
+
+                if (onShareResult != null) {
+                    OutlinedButton(
+                        onClick = onShareResult,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("adventure_share_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, GoldAccent.copy(alpha = 0.75f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent)
+                    ) {
+                        Text(
+                            text = "📤 SHARE VICTORY",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp
                         )
                     }
                 }

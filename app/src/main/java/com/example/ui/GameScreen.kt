@@ -1,5 +1,7 @@
 package com.example.ui
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -216,6 +218,7 @@ fun GameScreen(
                         RewardedAdRewardType.FREE_SHUFFLE -> viewModel.grantFreeShuffleAfterAd()
                         RewardedAdRewardType.FREE_BOMB -> viewModel.grantFreeBombAfterAd()
                         RewardedAdRewardType.FREE_ROTATE -> viewModel.grantFreeRotateAfterAd()
+                        RewardedAdRewardType.FREE_COLOR_BLAST -> viewModel.grantFreeColorBlastAfterAd()
                         RewardedAdRewardType.LUCKY_SPIN -> viewModel.grantBonusSpinAfterAd()
                     }
                 },
@@ -467,6 +470,7 @@ fun GameScreen(
                         ghostColorId = ghostColorId,
                         onCellTapped = { row, col ->
                             when {
+                                gameState.isColorBlastActive -> viewModel.useColorBlastOnCell(row, col)
                                 gameState.isBombActive -> viewModel.useBombOnCell(row, col)
                                 gameState.isHammerActive -> viewModel.useHammerOnCell(row, col)
                                 else -> {
@@ -495,6 +499,7 @@ fun GameScreen(
                         comboEventId = gameState.comboEventId,
                         lastClearedLinesCount = gameState.lastClearedLinesCount,
                         prospectiveLinesCount = prospectiveLinesCount,
+                        feverMovesRemaining = gameState.feverMovesRemaining,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .padding(top = 4.dp)
@@ -577,10 +582,36 @@ fun GameScreen(
                 }
 
                 androidx.compose.animation.AnimatedVisibility(
+                    visible = gameState.isColorBlastActive,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFFE040FB), Color(0xFFFF4081))))
+                            .clickable { viewModel.toggleColorBlastMode() }
+                            .padding(horizontal = 10.dp, vertical = 2.dp)
+                            .testTag("color_blast_active_instruction_pill")
+                    ) {
+                        Text(
+                            text = "🎨 TAP ANY BLOCK TO BLAST THAT COLOR (TAP TO CANCEL)",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
                     visible = gameState.selectedShapeIndex != null &&
                         !gameState.isHammerActive &&
                         !gameState.isBombActive &&
-                        !gameState.isRotateActive,
+                        !gameState.isRotateActive &&
+                        !gameState.isColorBlastActive,
                     enter = fadeIn(),
                     exit = fadeOut(),
                     modifier = Modifier
@@ -604,7 +635,7 @@ fun GameScreen(
                 }
             }
 
-            // 3. Dedicated Booster Dock (Hammer, Hint, Rotate, Shuffle, 3x3 Bomb, Shop)
+            // 3. Dedicated Booster Dock (Hammer, Hint, Rotate, Shuffle, Bomb, Color Blast, Shop)
             BoosterBar(
                 hammerCount = gameState.hammerCount,
                 isHammerActive = gameState.isHammerActive,
@@ -651,6 +682,15 @@ fun GameScreen(
                         freeBoosterPromptType = RewardedAdRewardType.FREE_ROTATE
                     } else {
                         viewModel.toggleRotateMode()
+                    }
+                },
+                colorBlastCount = gameState.colorBlastCount,
+                isColorBlastActive = gameState.isColorBlastActive,
+                onToggleColorBlast = {
+                    if (gameState.colorBlastCount <= 0 && !gameState.isColorBlastActive && adCoordinator != null) {
+                        freeBoosterPromptType = RewardedAdRewardType.FREE_COLOR_BLAST
+                    } else {
+                        viewModel.toggleColorBlastMode()
                     }
                 },
                 compactMode = isCompactHeight,
@@ -753,6 +793,10 @@ fun GameScreen(
                 onShowGlobalLeaderboard = {
                     leaderboardInitialTab = LeaderboardTab.HIGH_SCORES
                     showLeaderboardDialog = true
+                },
+                onShareScore = {
+                    val shareMessage = "🔥 I scored ${gameState.score} points (Best: ${gameState.highScore}, Max Combo: x${gameState.maxComboSession}, Lines: ${gameState.linesClearedSession}) in Block Blast! Can you beat me?"
+                    shareScoreSummary(context, shareMessage)
                 },
                 onRestart = { viewModel.startNewGame() }
             )
@@ -910,6 +954,7 @@ fun GameScreen(
                 shuffleCount = gameState.shuffleCount,
                 bombCount = gameState.bombCount,
                 rotateCount = gameState.rotateCount,
+                colorBlastCount = gameState.colorBlastCount,
                 isRewardedAdReady = adState.isRewardedAdReady,
                 isRewardedAdLoading = adState.isRewardedAdLoading,
                 isAdShowing = adState.isAdShowing,
@@ -922,6 +967,7 @@ fun GameScreen(
                         ShopBoosterType.SHUFFLE -> launchRewardedAd(RewardedAdRewardType.FREE_SHUFFLE)
                         ShopBoosterType.BOMB -> launchRewardedAd(RewardedAdRewardType.FREE_BOMB)
                         ShopBoosterType.ROTATE -> launchRewardedAd(RewardedAdRewardType.FREE_ROTATE)
+                        ShopBoosterType.COLOR_BLAST -> launchRewardedAd(RewardedAdRewardType.FREE_COLOR_BLAST)
                         ShopBoosterType.HINT -> Unit
                     }
                 } else null,
@@ -940,7 +986,9 @@ fun GameScreen(
                     showAdventureMapDialog = false
                     viewModel.startAdventureLevel(lvl)
                 },
-                onDismiss = { showAdventureMapDialog = false }
+                onDismiss = { showAdventureMapDialog = false },
+                claimedStarChestsCount = gameState.claimedStarChestsCount,
+                onClaimStarChest = { viewModel.claimAdventureStarChest() }
             )
         }
 
@@ -972,7 +1020,11 @@ fun GameScreen(
                 hasNextLevel = completedSpec.levelNumber < AdventureCatalog.totalLevels,
                 onNextLevel = { viewModel.advanceToNextAdventureLevel() },
                 onOpenMap = { showAdventureMapDialog = true },
-                onReplay = { viewModel.startAdventureLevel(completedSpec.levelNumber) }
+                onReplay = { viewModel.startAdventureLevel(completedSpec.levelNumber) },
+                onShareResult = {
+                    val shareMessage = "⭐ I cleared Block Blast Adventure Stage ${completedSpec.levelNumber} (${completedSpec.title}) with ${gameState.adventureEarnedStars}/3 stars and ${gameState.score} pts!"
+                    shareScoreSummary(context, shareMessage)
+                }
             )
         }
 
@@ -1010,22 +1062,26 @@ private fun FreeBoosterAdPromptDialog(
     val isHammer = rewardType == RewardedAdRewardType.FREE_HAMMER
     val isShuffle = rewardType == RewardedAdRewardType.FREE_SHUFFLE
     val isRotate = rewardType == RewardedAdRewardType.FREE_ROTATE
+    val isColorBlast = rewardType == RewardedAdRewardType.FREE_COLOR_BLAST
     val emoji = when {
         isHammer -> "🔨"
         isShuffle -> "🔄"
         isRotate -> "↻"
+        isColorBlast -> "🎨"
         else -> "💣"
     }
     val title = when {
         isHammer -> "OUT OF HAMMERS!"
         isShuffle -> "OUT OF SHUFFLES!"
         isRotate -> "OUT OF ROTATES!"
+        isColorBlast -> "OUT OF COLOR BLASTS!"
         else -> "OUT OF BOMBS!"
     }
     val body = when {
         isHammer -> "Watch a short video ad to earn +1 Free Hammer instantly, or craft one with Coins in the Shop."
         isShuffle -> "Watch a short video ad to earn +1 Free Shuffle instantly, or buy one with Coins in the Shop."
         isRotate -> "Watch a short video ad to earn +1 Free Piece Rotate instantly, or buy one with Coins in the Shop."
+        isColorBlast -> "Watch a short video ad to earn +1 Free Color Blast instantly, or buy one with Coins in the Shop."
         else -> "Watch a short video ad to earn +1 Free 3×3 Bomb instantly, or buy one with Coins in the Shop."
     }
     val watchCta = when {
@@ -1033,6 +1089,7 @@ private fun FreeBoosterAdPromptDialog(
         isHammer -> "WATCH AD • +1 HAMMER"
         isShuffle -> "WATCH AD • +1 SHUFFLE"
         isRotate -> "WATCH AD • +1 ROTATE"
+        isColorBlast -> "WATCH AD • +1 COLOR BLAST"
         else -> "WATCH AD • +1 BOMB"
     }
 
@@ -1174,5 +1231,17 @@ private fun DraggingPieceOverlay(
             theme = theme
         )
     }
+}
+
+private fun shareScoreSummary(context: Context, shareText: String) {
+    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, shareText)
+    }
+    val chooser = Intent.createChooser(sendIntent, "Share Block Blast Score")
+    if (context.findActivity() == null) {
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(chooser) }
 }
 

@@ -56,7 +56,8 @@ data class SavedGameSessionData(
     val iceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
     val heldPiece: BlockShape? = null,
     val canHoldThisTurn: Boolean = true,
-    val lightningCells: Set<Pair<Int, Int>> = emptySet()
+    val lightningCells: Set<Pair<Int, Int>> = emptySet(),
+    val feverMovesRemaining: Int = 0
 )
 
 @IgnoreExtraProperties

@@ -231,6 +231,7 @@ class LocalSessionStorage(context: Context) {
             put("heldPiece", heldPieceJson)
             put("canHoldThisTurn", session.canHoldThisTurn)
             put("lightningCells", lightningArr)
+            put("feverMovesRemaining", session.feverMovesRemaining)
         }
     }
 
@@ -366,7 +367,8 @@ class LocalSessionStorage(context: Context) {
             iceCells = iceMap,
             heldPiece = heldShape,
             canHoldThisTurn = json.optBoolean("canHoldThisTurn", true),
-            lightningCells = lightningSet
+            lightningCells = lightningSet,
+            feverMovesRemaining = json.optInt("feverMovesRemaining", 0).coerceAtLeast(0)
         )
     }
 

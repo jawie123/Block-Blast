@@ -38,6 +38,7 @@ fun BlockCell(
     isProspectiveClear: Boolean = false,
     isHammerTarget: Boolean = false,
     isBombTarget: Boolean = false,
+    isColorBlastTarget: Boolean = false,
     isGem: Boolean = false,
     isLightning: Boolean = false,
     iceLayers: Int = 0,
@@ -48,11 +49,11 @@ fun BlockCell(
     modifier: Modifier = Modifier
 ) {
     val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
-    val needsPulse = isProspectiveClear || isHammerTarget || isBombTarget
+    val needsPulse = isProspectiveClear || isHammerTarget || isBombTarget || isColorBlastTarget
     val resolvedPulse = when {
         !needsPulse -> 1f
         pulseAlpha != null -> pulseAlpha
-        else -> rememberLocalCellPulse(isFastTarget = isHammerTarget || isBombTarget)
+        else -> rememberLocalCellPulse(isFastTarget = isHammerTarget || isBombTarget || isColorBlastTarget)
     }
 
     when {
@@ -95,6 +96,7 @@ fun BlockCell(
             val palette = theme.paletteFor(colorId)
             val borderHighlight = when {
                 isBombTarget -> Color(0xFFFF5722).copy(alpha = resolvedPulse)
+                isColorBlastTarget -> Color(0xFFE040FB).copy(alpha = resolvedPulse)
                 isHammerTarget -> Color(0xFFFFB300).copy(alpha = resolvedPulse)
                 isProspectiveClear -> Color.White.copy(alpha = resolvedPulse)
                 iceLayers >= 2 -> Color(0xFFE1F5FE)
@@ -103,7 +105,7 @@ fun BlockCell(
                 isGem -> Color(0xFFFFD700)
                 else -> palette.light
             }
-            val borderWidth = if (isHammerTarget || isBombTarget || iceLayers >= 2 || isGem || isLightning) 1.8.dp else 1.dp
+            val borderWidth = if (isHammerTarget || isBombTarget || isColorBlastTarget || iceLayers >= 2 || isGem || isLightning) 1.8.dp else 1.dp
             val isWood = theme.isWoodStyle
 
             Box(

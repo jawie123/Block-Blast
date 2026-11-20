@@ -11,6 +11,7 @@ enum class RewardedAdRewardType {
     FREE_SHUFFLE,
     FREE_BOMB,
     FREE_ROTATE,
+    FREE_COLOR_BLAST,
     LUCKY_SPIN
 }
 

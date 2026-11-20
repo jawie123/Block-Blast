@@ -14,6 +14,7 @@ import com.example.model.Achievement
 import com.example.model.AchievementCatalog
 import com.example.model.AdventureCatalog
 import com.example.model.AdventureGoalType
+import com.example.model.AdventureStarChest
 import com.example.model.BlockShape
 import com.example.model.BoardThemeCatalog
 import com.example.model.BoardThemeId
@@ -81,10 +82,12 @@ class GameViewModel(
             shuffleCount = preferences.shuffleCount,
             bombCount = preferences.bombCount,
             rotateCount = preferences.rotateCount,
+            colorBlastCount = preferences.colorBlastCount,
             canClaimFreeLuckySpin = preferences.canClaimFreeSpinToday(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())),
             bonusSpinCount = preferences.bonusSpinCount,
             adventureLevelNumber = preferences.adventureCurrentLevel,
             adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
+            claimedStarChestsCount = preferences.claimedStarChestsCount,
             selectedThemeId = preferences.selectedThemeId,
             unlockedThemeIds = preferences.getUnlockedThemeIds(),
             isMusicEnabled = preferences.isMusicEnabled,
@@ -178,6 +181,8 @@ class GameViewModel(
                     isNewHighScore = it.isNewHighScore || isNewRecord,
                     isHammerActive = false,
                     isBombActive = false,
+                    isRotateActive = false,
+                    isColorBlastActive = false,
                     selectedShapeIndex = null,
                     hoverRow = null,
                     hoverCol = null,
@@ -363,6 +368,9 @@ class GameViewModel(
             isBombActive = false,
             rotateCount = preferences.rotateCount,
             isRotateActive = false,
+            colorBlastCount = preferences.colorBlastCount,
+            isColorBlastActive = false,
+            feverMovesRemaining = session.feverMovesRemaining,
             heldPiece = session.heldPiece,
             canHoldThisTurn = session.canHoldThisTurn,
             lightningCells = session.lightningCells,
@@ -372,6 +380,7 @@ class GameViewModel(
             iceCells = if (isAdventure) session.iceCells else emptyMap(),
             adventureLevelNumber = adventureLevelSpec.levelNumber,
             adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
+            claimedStarChestsCount = preferences.claimedStarChestsCount,
             adventureGemsCollected = session.adventureGemsCollected,
             adventureIceBroken = session.adventureIceBroken,
             adventureInitialIceTotal = adventureLevelSpec.initialIceCells.size,
@@ -633,7 +642,8 @@ class GameViewModel(
             iceCells = state.iceCells,
             heldPiece = state.heldPiece,
             canHoldThisTurn = state.canHoldThisTurn,
-            lightningCells = state.lightningCells
+            lightningCells = state.lightningCells,
+            feverMovesRemaining = state.feverMovesRemaining
         )
         localSessionStorage?.saveSessionBackground(session)
 
@@ -675,6 +685,8 @@ class GameViewModel(
         val shuffleCount: Int = 2,
         val bombCount: Int = 1,
         val rotateCount: Int = 3,
+        val colorBlastCount: Int = 1,
+        val feverMovesRemaining: Int = 0,
         val gemCells: Set<Pair<Int, Int>> = emptySet(),
         val iceCells: Map<Pair<Int, Int>, Int> = emptyMap(),
         val heldPiece: BlockShape? = null,
@@ -840,6 +852,9 @@ class GameViewModel(
             isBombActive = false,
             rotateCount = preferences.rotateCount,
             isRotateActive = false,
+            colorBlastCount = preferences.colorBlastCount,
+            isColorBlastActive = false,
+            feverMovesRemaining = 0,
             heldPiece = null,
             canHoldThisTurn = true,
             lightningCells = emptySet(),
@@ -850,6 +865,7 @@ class GameViewModel(
             iceCells = if (isAdventure) adventureSpec.initialIceCells else emptyMap(),
             adventureLevelNumber = adventureSpec.levelNumber,
             adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
+            claimedStarChestsCount = preferences.claimedStarChestsCount,
             adventureGemsCollected = 0,
             adventureIceBroken = 0,
             adventureInitialIceTotal = if (isAdventure) adventureSpec.initialIceCells.size else 0,
@@ -968,6 +984,7 @@ class GameViewModel(
         preferences.shuffleCount = snapshot.shuffleCount
         preferences.bombCount = snapshot.bombCount
         preferences.rotateCount = snapshot.rotateCount
+        preferences.colorBlastCount = snapshot.colorBlastCount
 
         val revertedTier = DifficultyTier.fromScore(snapshot.score)
         val revertedProgress = DifficultyTier.progressToNextTier(snapshot.score)
@@ -991,6 +1008,8 @@ class GameViewModel(
                 shuffleCount = snapshot.shuffleCount,
                 bombCount = snapshot.bombCount,
                 rotateCount = snapshot.rotateCount,
+                colorBlastCount = snapshot.colorBlastCount,
+                feverMovesRemaining = snapshot.feverMovesRemaining,
                 heldPiece = snapshot.heldPiece,
                 canHoldThisTurn = snapshot.canHoldThisTurn,
                 lightningCells = snapshot.lightningCells,
@@ -1004,6 +1023,7 @@ class GameViewModel(
                 isHammerActive = false,
                 isBombActive = false,
                 isRotateActive = false,
+                isColorBlastActive = false,
                 activeHint = null,
                 selectedShapeIndex = null,
                 hoverRow = null,
@@ -1082,6 +1102,7 @@ class GameViewModel(
                 isBombActive = if (index != null) false else it.isBombActive,
                 isHammerActive = if (index != null) false else it.isHammerActive,
                 isRotateActive = if (index != null) false else it.isRotateActive,
+                isColorBlastActive = if (index != null) false else it.isColorBlastActive,
                 activeHint = null,
                 hoverRow = null,
                 hoverCol = null,
@@ -1309,6 +1330,8 @@ class GameViewModel(
             shuffleCount = currentState.shuffleCount,
             bombCount = currentState.bombCount,
             rotateCount = currentState.rotateCount,
+            colorBlastCount = currentState.colorBlastCount,
+            feverMovesRemaining = currentState.feverMovesRemaining,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
             heldPiece = currentState.heldPiece,
@@ -1360,7 +1383,9 @@ class GameViewModel(
         var iceBrokenThisMove = 0
         var laserExtraPoints = 0
         var lasersTriggeredCount = 0
+        var colorMatchLines = 0
         var perfectBoardClear = false
+        val wasInFever = currentState.feverMovesRemaining > 0
 
         if (totalLines > 0) {
             newCombo = currentState.comboStreak + 1
@@ -1373,6 +1398,21 @@ class GameViewModel(
                 else -> if (totalLines > 4) 1000 else 0
             }
             linePoints += bonus
+
+            // Detect monochromatic same-color line clears (+250 bonus points per color-matched line)
+            for (r in completedRows) {
+                val firstColor = newGrid[r][0]
+                if (firstColor > 0 && (1 until 8).all { c -> newGrid[r][c] == firstColor }) {
+                    colorMatchLines++
+                }
+            }
+            for (c in completedCols) {
+                val firstColor = newGrid[0][c]
+                if (firstColor > 0 && (1 until 8).all { r -> newGrid[r][c] == firstColor }) {
+                    colorMatchLines++
+                }
+            }
+            linePoints += colorMatchLines * COLOR_MATCH_LINE_BONUS
 
             for (r in completedRows) {
                 for (c in 0 until 8) {
@@ -1462,20 +1502,32 @@ class GameViewModel(
                 linePoints += PERFECT_BOARD_CLEAR_POINTS
                 soundManager.playComboCheer()
                 triggerHaptic(HapticEffect.PowerUp)
-            } else if (lasersTriggeredCount > 0 || newCombo >= 2) {
+            } else if (lasersTriggeredCount > 0 || newCombo >= 2 || colorMatchLines > 0) {
                 soundManager.playComboCheer()
                 triggerHaptic(HapticEffect.LineClear(maxOf(newCombo, 3)))
             } else {
                 soundManager.playLineClear(newCombo)
                 triggerHaptic(HapticEffect.LineClear(newCombo))
             }
+
+            if (wasInFever) {
+                linePoints *= 2
+            }
         } else {
             triggerHaptic(HapticEffect.Placement)
         }
 
+        val nextFeverMoves = when {
+            wasInFever -> (currentState.feverMovesRemaining - 1).coerceAtLeast(0)
+            newCombo >= 4 -> FEVER_DURATION_MOVES
+            else -> 0
+        }
+        val feverJustActivated = newCombo >= 4 && !wasInFever
+
         val gemCoinBonus = gemsCollectedThisMove * 5
+        val feverCoinBonus = if (wasInFever && totalLines > 0) totalLines * FEVER_COINS_PER_LINE else 0
         val boardClearCoinBonus = if (perfectBoardClear) PERFECT_BOARD_CLEAR_COINS else 0
-        val earnedCoinBonus = gemCoinBonus + boardClearCoinBonus
+        val earnedCoinBonus = gemCoinBonus + feverCoinBonus + boardClearCoinBonus
         if (earnedCoinBonus > 0) {
             preferences.coinsBalance = preferences.coinsBalance + earnedCoinBonus
             preferences.totalCoinsEarned = preferences.totalCoinsEarned + earnedCoinBonus
@@ -1545,6 +1597,7 @@ class GameViewModel(
         }
 
         val baseBannerText = when {
+            wasInFever && totalLines > 0 -> "🔥 FEVER 2×! +$totalMovePoints (+$feverCoinBonus 🪙)"
             totalLines >= 3 -> "MEGA BLAST! +$totalMovePoints"
             totalLines == 2 -> "DOUBLE LINE! +$totalMovePoints"
             newCombo >= 2 -> "COMBO x$newCombo! +$totalMovePoints"
@@ -1715,6 +1768,8 @@ class GameViewModel(
 
         val boardClearBanner = when {
             perfectBoardClear -> "✨ PERFECT BOARD CLEAR! +$PERFECT_BOARD_CLEAR_POINTS PTS • +$PERFECT_BOARD_CLEAR_COINS 🪙"
+            feverJustActivated -> "🔥 FEVER 2× ACTIVATED! +$totalMovePoints"
+            colorMatchLines > 0 -> "🌈 COLOR MATCH! +$totalMovePoints"
             lasersTriggeredCount > 0 -> "⚡ CROSS-LASER BLAST! +$totalMovePoints"
             gemsCollectedThisMove > 0 -> "💎 +$gemsCollectedThisMove GEM${if (gemsCollectedThisMove > 1) "S" else ""} • +${gemCoinBonus} 🪙"
             spawnedLightningNow -> "⚡ CROSS-LASER CHARGED! +$totalMovePoints"
@@ -1773,6 +1828,8 @@ class GameViewModel(
                 isHammerActive = false,
                 isBombActive = false,
                 isRotateActive = false,
+                isColorBlastActive = false,
+                feverMovesRemaining = nextFeverMoves,
                 activeHint = null,
                 hoverRow = null,
                 hoverCol = null,
@@ -1988,6 +2045,8 @@ class GameViewModel(
             it.copy(
                 isHammerActive = willBeActive,
                 isBombActive = if (willBeActive) false else it.isBombActive,
+                isRotateActive = if (willBeActive) false else it.isRotateActive,
+                isColorBlastActive = if (willBeActive) false else it.isColorBlastActive,
                 selectedShapeIndex = if (willBeActive) null else it.selectedShapeIndex,
                 activeHint = if (willBeActive) null else it.activeHint,
                 hoverPreviewCells = if (willBeActive) emptySet() else it.hoverPreviewCells,
@@ -2074,6 +2133,8 @@ class GameViewModel(
                 activeHint = bestHint,
                 isHammerActive = false,
                 isBombActive = false,
+                isRotateActive = false,
+                isColorBlastActive = false,
                 selectedShapeIndex = bestHint.pieceIndex,
                 hoverRow = bestHint.row,
                 hoverCol = bestHint.col,
@@ -2221,6 +2282,8 @@ class GameViewModel(
             shuffleCount = currentState.shuffleCount,
             bombCount = currentState.bombCount,
             rotateCount = currentState.rotateCount,
+            colorBlastCount = currentState.colorBlastCount,
+            feverMovesRemaining = currentState.feverMovesRemaining,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
             heldPiece = currentState.heldPiece,
@@ -2338,6 +2401,7 @@ class GameViewModel(
                 isHammerActive = false,
                 isBombActive = false,
                 isRotateActive = false,
+                isColorBlastActive = false,
                 activeHint = null,
                 isGameOver = stillGameOver,
                 lineClearBursts = bursts,
@@ -2392,6 +2456,8 @@ class GameViewModel(
             shuffleCount = currentState.shuffleCount,
             bombCount = currentState.bombCount,
             rotateCount = currentState.rotateCount,
+            colorBlastCount = currentState.colorBlastCount,
+            feverMovesRemaining = currentState.feverMovesRemaining,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
             heldPiece = currentState.heldPiece,
@@ -2460,6 +2526,8 @@ class GameViewModel(
                 dailyBatchIndex = nextBatchIndex,
                 isHammerActive = false,
                 isBombActive = false,
+                isRotateActive = false,
+                isColorBlastActive = false,
                 selectedShapeIndex = null,
                 activeHint = null,
                 hoverRow = null,
@@ -2498,6 +2566,8 @@ class GameViewModel(
             it.copy(
                 isBombActive = willBeActive,
                 isHammerActive = if (willBeActive) false else it.isHammerActive,
+                isRotateActive = if (willBeActive) false else it.isRotateActive,
+                isColorBlastActive = if (willBeActive) false else it.isColorBlastActive,
                 selectedShapeIndex = if (willBeActive) null else it.selectedShapeIndex,
                 activeHint = if (willBeActive) null else it.activeHint,
                 hoverPreviewCells = if (willBeActive) emptySet() else it.hoverPreviewCells,
@@ -2562,6 +2632,8 @@ class GameViewModel(
             shuffleCount = currentState.shuffleCount,
             bombCount = currentState.bombCount,
             rotateCount = currentState.rotateCount,
+            colorBlastCount = currentState.colorBlastCount,
+            feverMovesRemaining = currentState.feverMovesRemaining,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
             heldPiece = currentState.heldPiece,
@@ -2676,6 +2748,7 @@ class GameViewModel(
                 isBombActive = false,
                 isHammerActive = false,
                 isRotateActive = false,
+                isColorBlastActive = false,
                 activeHint = null,
                 isGameOver = stillGameOver,
                 lineClearBursts = allBursts,
@@ -2778,6 +2851,7 @@ class GameViewModel(
         var nextShuffle = preferences.shuffleCount
         var nextBomb = preferences.bombCount
         var nextRotate = preferences.rotateCount
+        var nextColorBlast = preferences.colorBlastCount
 
         when (booster) {
             ShopBoosterType.HAMMER -> {
@@ -2800,6 +2874,10 @@ class GameViewModel(
                 nextRotate += 1
                 preferences.rotateCount = nextRotate
             }
+            ShopBoosterType.COLOR_BLAST -> {
+                nextColorBlast += 1
+                preferences.colorBlastCount = nextColorBlast
+            }
         }
 
         soundManager.playPowerup()
@@ -2814,6 +2892,7 @@ class GameViewModel(
                 shuffleCount = nextShuffle,
                 bombCount = nextBomb,
                 rotateCount = nextRotate,
+                colorBlastCount = nextColorBlast,
                 comboBannerText = boughtBanner
             )
         }
@@ -2824,6 +2903,242 @@ class GameViewModel(
             delay(1500)
             _gameState.update {
                 if (it.comboBannerText == boughtBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    fun toggleColorBlastMode() {
+        val current = _gameState.value
+        if (current.colorBlastCount <= 0 && !current.isColorBlastActive) {
+            showTemporaryBanner("NO COLOR BLASTS LEFT! VISIT SHOP OR WATCH AD")
+            return
+        }
+
+        val willBeActive = !current.isColorBlastActive
+        _gameState.update {
+            it.copy(
+                isColorBlastActive = willBeActive,
+                isHammerActive = if (willBeActive) false else it.isHammerActive,
+                isBombActive = if (willBeActive) false else it.isBombActive,
+                isRotateActive = if (willBeActive) false else it.isRotateActive,
+                selectedShapeIndex = if (willBeActive) null else it.selectedShapeIndex,
+                activeHint = if (willBeActive) null else it.activeHint,
+                hoverPreviewCells = if (willBeActive) emptySet() else it.hoverPreviewCells,
+                prospectiveRows = if (willBeActive) emptySet() else it.prospectiveRows,
+                prospectiveCols = if (willBeActive) emptySet() else it.prospectiveCols,
+                comboBannerText = if (willBeActive) "🎨 TAP ANY BLOCK TO BLAST ALL OF THAT COLOR!" else null
+            )
+        }
+
+        if (willBeActive) {
+            soundManager.playPickup()
+            triggerHaptic(HapticEffect.Pickup)
+        }
+    }
+
+    /**
+     * Blasts every block on the 8x8 grid matching the color of ([row], [col]),
+     * triggering any hit ⚡ Cross-Lasers, breaking ice, and collecting gems.
+     */
+    fun useColorBlastOnCell(row: Int, col: Int): Boolean {
+        val currentState = _gameState.value
+        if (!currentState.isColorBlastActive || currentState.colorBlastCount <= 0) return false
+        val targetColor = currentState.grid.getOrNull(row)?.getOrNull(col) ?: 0
+        if (targetColor <= 0) return false
+
+        val initialColorCoords = mutableListOf<Pair<Int, Int>>()
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                if (currentState.grid[r][c] == targetColor) {
+                    initialColorCoords.add(r to c)
+                }
+            }
+        }
+        if (initialColorCoords.isEmpty()) return false
+
+        hasUserInteractedThisSession = true
+        lastUndoSnapshot = UndoSnapshot(
+            grid = currentState.grid,
+            activePieces = currentState.activePieces,
+            score = currentState.score,
+            highScore = currentState.highScore,
+            comboStreak = currentState.comboStreak,
+            maxComboSession = currentState.maxComboSession,
+            linesClearedSession = currentState.linesClearedSession,
+            isGameOver = currentState.isGameOver,
+            isNewHighScore = currentState.isNewHighScore,
+            dailyBatchIndex = currentState.dailyBatchIndex,
+            hammerCount = currentState.hammerCount,
+            shuffleCount = currentState.shuffleCount,
+            bombCount = currentState.bombCount,
+            rotateCount = currentState.rotateCount,
+            colorBlastCount = currentState.colorBlastCount,
+            feverMovesRemaining = currentState.feverMovesRemaining,
+            gemCells = currentState.gemCells,
+            iceCells = currentState.iceCells,
+            heldPiece = currentState.heldPiece,
+            canHoldThisTurn = currentState.canHoldThisTurn,
+            lightningCells = currentState.lightningCells,
+            adventureGemsCollected = currentState.adventureGemsCollected,
+            adventureIceBroken = currentState.adventureIceBroken,
+            adventureLevelCompleted = currentState.adventureLevelCompleted,
+            timeRemainingMs = currentState.timeRemainingMs,
+            gameOverReason = currentState.gameOverReason
+        )
+
+        val newGrid = currentState.grid.map { it.toMutableList() }.toMutableList()
+        val mutableIce = currentState.iceCells.toMutableMap()
+        val mutableGems = currentState.gemCells.toMutableSet()
+        val mutableLightning = currentState.lightningCells.toMutableSet()
+
+        val allClearedCoords = linkedSetOf<Pair<Int, Int>>().apply { addAll(initialColorCoords) }
+        val laserQueue = ArrayDeque<Pair<Int, Int>>()
+        val seenLasers = mutableSetOf<Pair<Int, Int>>()
+        for (coord in initialColorCoords) {
+            if (mutableLightning.remove(coord) && seenLasers.add(coord)) {
+                laserQueue.addLast(coord)
+            }
+        }
+        while (laserQueue.isNotEmpty()) {
+            val (lr, lc) = laserQueue.removeFirst()
+            for (i in 0 until 8) {
+                val rCoord = lr to i
+                if (newGrid[lr][i] > 0 || rCoord in mutableLightning) {
+                    allClearedCoords.add(rCoord)
+                    if (mutableLightning.remove(rCoord) && seenLasers.add(rCoord)) {
+                        laserQueue.addLast(rCoord)
+                    }
+                }
+                val cCoord = i to lc
+                if (newGrid[i][lc] > 0 || cCoord in mutableLightning) {
+                    allClearedCoords.add(cCoord)
+                    if (mutableLightning.remove(cCoord) && seenLasers.add(cCoord)) {
+                        laserQueue.addLast(cCoord)
+                    }
+                }
+            }
+        }
+
+        val allBursts = mutableListOf<LineClearBurst>()
+        var gemsAdded = 0
+        var iceAdded = 0
+        for (coord in allClearedCoords) {
+            val tileColor = newGrid[coord.first][coord.second]
+            allBursts.add(
+                LineClearBurst(
+                    row = coord.first,
+                    col = coord.second,
+                    colorId = if (tileColor > 0) tileColor else targetColor,
+                    comboMultiplier = 3,
+                    isRowClear = true,
+                    isColClear = true
+                )
+            )
+            newGrid[coord.first][coord.second] = 0
+            if (mutableIce.remove(coord) != null) iceAdded++
+            if (mutableGems.remove(coord)) gemsAdded++
+        }
+
+        val bonusPts = allClearedCoords.size * 15
+        val nextScore = currentState.score + bonusPts
+        val nextHigh = maxOf(currentState.highScore, nextScore)
+        if (gemsAdded > 0) {
+            preferences.coinsBalance = preferences.coinsBalance + gemsAdded * 5
+            preferences.totalCoinsEarned = preferences.totalCoinsEarned + gemsAdded * 5
+        }
+        val nextGemsCollected = currentState.adventureGemsCollected + gemsAdded
+        val nextIceBroken = currentState.adventureIceBroken + iceAdded
+        val frozenGrid = newGrid.map { it.toList() }
+
+        val newColorBlastCount = (currentState.colorBlastCount - 1).coerceAtLeast(0)
+        preferences.colorBlastCount = newColorBlastCount
+
+        soundManager.playComboCheer()
+        triggerHaptic(HapticEffect.LineClear(3))
+
+        val adventureDone = evaluateAdventureClearAfterBooster(
+            state = currentState.copy(score = nextScore),
+            nextIce = mutableIce,
+            nextGemsCollected = nextGemsCollected
+        )
+        val stillGameOver = if (adventureDone) false else checkGameOver(frozenGrid, currentState.activePieces)
+        val blastBanner = "🎨 COLOR BLAST! ${allClearedCoords.size} BLOCKS (+$bonusPts PTS)"
+
+        _gameState.update {
+            it.copy(
+                grid = frozenGrid,
+                score = nextScore,
+                highScore = nextHigh,
+                lightningCells = mutableLightning.toSet(),
+                gemCells = mutableGems.toSet(),
+                iceCells = mutableIce.toMap(),
+                adventureGemsCollected = nextGemsCollected,
+                adventureIceBroken = nextIceBroken,
+                adventureLevelCompleted = adventureDone || it.adventureLevelCompleted,
+                adventureEarnedStars = if (adventureDone && !it.adventureLevelCompleted) {
+                    AdventureCatalog.computeStars(AdventureCatalog.level(it.adventureLevelNumber), nextScore)
+                } else it.adventureEarnedStars,
+                adventureMaxUnlockedLevel = preferences.adventureMaxUnlockedLevel,
+                coinsBalance = preferences.coinsBalance,
+                colorBlastCount = newColorBlastCount,
+                isColorBlastActive = false,
+                isBombActive = false,
+                isHammerActive = false,
+                isRotateActive = false,
+                activeHint = null,
+                isGameOver = stillGameOver,
+                lineClearBursts = allBursts,
+                comboBannerText = blastBanner,
+                shakeEventId = it.shakeEventId + 1L,
+                canUndo = true
+            )
+        }
+
+        flushSession(syncToCloud = true)
+
+        viewModelScope.launch {
+            delay(450)
+            _gameState.update { it.copy(lineClearBursts = emptyList()) }
+            delay(900)
+            _gameState.update {
+                if (it.comboBannerText == blastBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+        return true
+    }
+
+    fun claimAdventureStarChest(): Boolean {
+        val totalStars = (1..AdventureCatalog.totalLevels).sumOf { preferences.getAdventureLevelStars(it) }
+        val claimedCount = preferences.claimedStarChestsCount
+        if (!AdventureStarChest.hasClaimableChest(totalStars, claimedCount)) {
+            return false
+        }
+        val nextClaimed = claimedCount + 1
+        preferences.claimedStarChestsCount = nextClaimed
+        preferences.coinsBalance = preferences.coinsBalance + AdventureStarChest.COINS_REWARD
+        preferences.totalCoinsEarned = preferences.totalCoinsEarned + AdventureStarChest.COINS_REWARD
+        preferences.hammerCount = preferences.hammerCount + AdventureStarChest.HAMMER_REWARD
+        preferences.colorBlastCount = preferences.colorBlastCount + AdventureStarChest.COLOR_BLAST_REWARD
+
+        soundManager.playComboCheer()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val chestBanner = "🎁 STAR CHEST! +${AdventureStarChest.COINS_REWARD} 🪙 +${AdventureStarChest.HAMMER_REWARD} 🔨 +${AdventureStarChest.COLOR_BLAST_REWARD} 🎨"
+        _gameState.update {
+            it.copy(
+                claimedStarChestsCount = nextClaimed,
+                coinsBalance = preferences.coinsBalance,
+                hammerCount = preferences.hammerCount,
+                colorBlastCount = preferences.colorBlastCount,
+                comboBannerText = chestBanner
+            )
+        }
+
+        viewModelScope.launch {
+            delay(1800)
+            _gameState.update {
+                if (it.comboBannerText == chestBanner) it.copy(comboBannerText = null) else it
             }
         }
         return true
@@ -2854,6 +3169,7 @@ class GameViewModel(
                 isRotateActive = willBeActive,
                 isHammerActive = if (willBeActive) false else it.isHammerActive,
                 isBombActive = if (willBeActive) false else it.isBombActive,
+                isColorBlastActive = if (willBeActive) false else it.isColorBlastActive,
                 activeHint = if (willBeActive) null else it.activeHint,
                 hoverPreviewCells = if (willBeActive) emptySet() else it.hoverPreviewCells,
                 prospectiveRows = if (willBeActive) emptySet() else it.prospectiveRows,
@@ -2898,6 +3214,8 @@ class GameViewModel(
             shuffleCount = currentState.shuffleCount,
             bombCount = currentState.bombCount,
             rotateCount = currentState.rotateCount,
+            colorBlastCount = currentState.colorBlastCount,
+            feverMovesRemaining = currentState.feverMovesRemaining,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
             heldPiece = currentState.heldPiece,
@@ -3570,6 +3888,30 @@ class GameViewModel(
         }
     }
 
+    fun grantFreeColorBlastAfterAd() {
+        val nextBlasts = preferences.colorBlastCount + 1
+        preferences.colorBlastCount = nextBlasts
+
+        soundManager.playPowerup()
+        triggerHaptic(HapticEffect.PowerUp)
+
+        val earnedBanner = "+1 🎨 FREE COLOR BLAST EARNED!"
+        _gameState.update {
+            it.copy(
+                colorBlastCount = nextBlasts,
+                comboBannerText = earnedBanner
+            )
+        }
+        flushSession(syncToCloud = true)
+
+        viewModelScope.launch {
+            delay(1600)
+            _gameState.update {
+                if (it.comboBannerText == earnedBanner) it.copy(comboBannerText = null) else it
+            }
+        }
+    }
+
     /**
      * Hold Piece Pocket: Stores a tray piece in the Hold pocket, swaps the selected tray piece
      * with the currently held piece, or recalls the held piece into an open tray slot.
@@ -3637,6 +3979,8 @@ class GameViewModel(
             shuffleCount = currentState.shuffleCount,
             bombCount = currentState.bombCount,
             rotateCount = currentState.rotateCount,
+            colorBlastCount = currentState.colorBlastCount,
+            feverMovesRemaining = currentState.feverMovesRemaining,
             gemCells = currentState.gemCells,
             iceCells = currentState.iceCells,
             heldPiece = currentState.heldPiece,
@@ -3675,6 +4019,7 @@ class GameViewModel(
                 isHammerActive = false,
                 isBombActive = false,
                 isRotateActive = false,
+                isColorBlastActive = false,
                 activeHint = null,
                 hoverRow = null,
                 hoverCol = null,
@@ -3823,6 +4168,9 @@ class GameViewModel(
         const val TIME_ATTACK_SECOND_CHANCE_MS = 15_000L
         const val PERFECT_BOARD_CLEAR_POINTS = 500
         const val PERFECT_BOARD_CLEAR_COINS = 25
+        const val FEVER_DURATION_MOVES = 3
+        const val FEVER_COINS_PER_LINE = 5
+        const val COLOR_MATCH_LINE_BONUS = 250
 
         fun provideFactory(
             context: Context,

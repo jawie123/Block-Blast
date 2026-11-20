@@ -90,6 +90,10 @@ class GamePreferences(context: Context) {
         get() = prefs.getInt(KEY_ROTATE_COUNT, 3).coerceAtLeast(0)
         set(value) = prefs.edit().putInt(KEY_ROTATE_COUNT, value.coerceAtLeast(0)).apply()
 
+    var colorBlastCount: Int
+        get() = prefs.getInt(KEY_COLOR_BLAST_COUNT, 1).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_COLOR_BLAST_COUNT, value.coerceAtLeast(0)).apply()
+
     var adventureCurrentLevel: Int
         get() = prefs.getInt(KEY_ADVENTURE_CURRENT_LEVEL, 1).coerceAtLeast(1)
         set(value) = prefs.edit().putInt(KEY_ADVENTURE_CURRENT_LEVEL, value.coerceAtLeast(1)).apply()
@@ -97,6 +101,10 @@ class GamePreferences(context: Context) {
     var adventureMaxUnlockedLevel: Int
         get() = prefs.getInt(KEY_ADVENTURE_MAX_UNLOCKED_LEVEL, 1).coerceAtLeast(1)
         set(value) = prefs.edit().putInt(KEY_ADVENTURE_MAX_UNLOCKED_LEVEL, value.coerceAtLeast(1)).apply()
+
+    var claimedStarChestsCount: Int
+        get() = prefs.getInt(KEY_CLAIMED_STAR_CHESTS_COUNT, 0).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_CLAIMED_STAR_CHESTS_COUNT, value.coerceAtLeast(0)).apply()
 
     fun getAdventureLevelStars(level: Int): Int =
         prefs.getInt("adv_stars_$level", 0).coerceIn(0, 3)
@@ -292,8 +300,10 @@ class GamePreferences(context: Context) {
         private const val KEY_SHUFFLE_COUNT = "key_shuffle_count"
         private const val KEY_BOMB_COUNT = "key_bomb_count"
         private const val KEY_ROTATE_COUNT = "key_rotate_count"
+        private const val KEY_COLOR_BLAST_COUNT = "key_color_blast_count"
         private const val KEY_ADVENTURE_CURRENT_LEVEL = "key_adventure_current_level"
         private const val KEY_ADVENTURE_MAX_UNLOCKED_LEVEL = "key_adventure_max_unlocked_level"
+        private const val KEY_CLAIMED_STAR_CHESTS_COUNT = "key_claimed_star_chests_count"
         private const val KEY_SELECTED_THEME_ID = "key_selected_theme_id"
         private const val KEY_UNLOCKED_THEME_IDS = "key_unlocked_theme_ids"
         private const val KEY_TOTAL_ALL_TIME_SCORE = "key_total_all_time_score"

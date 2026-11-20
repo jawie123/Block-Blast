@@ -64,8 +64,10 @@ fun ComboMultiplierHud(
     comboEventId: Long,
     lastClearedLinesCount: Int = 0,
     prospectiveLinesCount: Int = 0,
+    feverMovesRemaining: Int = 0,
     modifier: Modifier = Modifier
 ) {
+    val isFeverActive = feverMovesRemaining > 0
     val isPreviewOnly = comboStreak == 0 && prospectiveLinesCount > 0
     val displayMultiplier = when {
         comboStreak > 0 && prospectiveLinesCount > 0 -> comboStreak + 1
@@ -73,10 +75,11 @@ fun ComboMultiplierHud(
         prospectiveLinesCount > 0 -> 1
         else -> 0
     }
-    val isVisible = displayMultiplier > 0
+    val isVisible = displayMultiplier > 0 || isFeverActive
 
-    // Tier styling aligned with ComboStreakMeter
+    // Tier styling aligned with ComboStreakMeter & Fever Overdrive
     val tierGradient = when {
+        isFeverActive -> listOf(Color(0xFFFFD700), Color(0xFFFF3D00))
         displayMultiplier >= 5 -> listOf(Color(0xFFFFD700), Color(0xFFFF6D00))
         displayMultiplier == 4 -> listOf(Color(0xFFFF9100), Color(0xFFFF3D00))
         displayMultiplier == 3 -> listOf(Color(0xFFFF007A), Color(0xFFC51162))
@@ -85,6 +88,7 @@ fun ComboMultiplierHud(
     }
 
     val tierAccent = when {
+        isFeverActive -> Color(0xFFFFD700)
         displayMultiplier >= 5 -> Color(0xFFFFD700)
         displayMultiplier == 4 -> Color(0xFFFF9100)
         displayMultiplier == 3 -> Color(0xFFFF4081)
@@ -93,6 +97,7 @@ fun ComboMultiplierHud(
     }
 
     val tierTitle = when {
+        isFeverActive -> "🔥 FEVER 2× MODE"
         isPreviewOnly -> "READY CLEAR"
         prospectiveLinesCount > 0 -> "NEXT COMBO"
         displayMultiplier >= 5 -> "GODLIKE STREAK"
@@ -242,7 +247,7 @@ fun ComboMultiplierHud(
 
                 // Animated Real-Time Multiplier Readout
                 AnimatedContent(
-                    targetState = displayMultiplier,
+                    targetState = if (displayMultiplier > 0) displayMultiplier else 2,
                     transitionSpec = {
                         (scaleIn(
                             initialScale = 0.5f,
@@ -253,7 +258,7 @@ fun ComboMultiplierHud(
                     label = "combo_multiplier_value"
                 ) { mult ->
                     Text(
-                        text = "${mult}x",
+                        text = if (isFeverActive && displayMultiplier == 0) "2×" else "${mult}x",
                         color = tierAccent,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Black,
@@ -272,6 +277,7 @@ fun ComboMultiplierHud(
                         letterSpacing = 0.6.sp
                     )
                     val subLabel = when {
+                        isFeverActive -> "2× SCORE • $feverMovesRemaining MOVE${if (feverMovesRemaining > 1) "S" else ""}"
                         prospectiveLinesCount > 0 -> "+$prospectiveLinesCount LINE${if (prospectiveLinesCount > 1) "S" else ""} ON DROP"
                         lastClearedLinesCount > 0 -> "+$lastClearedLinesCount LINE${if (lastClearedLinesCount > 1) "S" else ""} CLEARED!"
                         else -> "STREAK MULTIPLIER"
@@ -280,7 +286,8 @@ fun ComboMultiplierHud(
                         text = subLabel,
                         color = tierAccent.copy(alpha = 0.9f),
                         fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = if (isFeverActive) Modifier.testTag("fever_mode_hud_badge") else Modifier
                     )
                 }
             }

@@ -75,12 +75,16 @@ fun GridBoard(
     val haptic = LocalHapticFeedback.current
 
     val streak = gameState.comboStreak
+    val isFeverMode = gameState.feverMovesRemaining > 0
     val isHighScoreStreak = gameState.isNewHighScore || streak >= 4
     val isBombMode = gameState.isBombActive
+    val isColorBlastMode = gameState.isColorBlastActive
 
-    // Dynamic background colors responding smoothly to combo streaks, multipliers, and themes
+    // Dynamic background colors responding smoothly to combo streaks, fever mode, boosters, and themes
     val targetBgTop = when {
         isBombMode -> Color(0xFF281210)
+        isColorBlastMode -> Color(0xFF281238)
+        isFeverMode -> Color(0xFF331808)
         isHighScoreStreak -> Color(0xFF26190B) // Radiant Gold-Amber aura
         streak >= 3 -> Color(0xFF2A1028) // Fiery Crimson / Magenta aura
         streak == 2 -> Color(0xFF1B1438) // Electric Purple aura
@@ -90,6 +94,8 @@ fun GridBoard(
 
     val targetBgBottom = when {
         isBombMode -> Color(0xFF170B0A)
+        isColorBlastMode -> Color(0xFF170B22)
+        isFeverMode -> Color(0xFF220E04)
         isHighScoreStreak -> Color(0xFF181005)
         streak >= 3 -> Color(0xFF1A0A19)
         streak == 2 -> Color(0xFF110D24)
@@ -99,6 +105,8 @@ fun GridBoard(
 
     val targetBorderColor = when {
         isBombMode -> Color(0xFFFF5722)
+        isColorBlastMode -> Color(0xFFE040FB)
+        isFeverMode -> Color(0xFFFFD700)
         isHighScoreStreak -> Color(0xFFFFD700) // Golden crown border
         streak >= 3 -> Color(0xFFFF007A) // Hot Pink / Neon Crimson
         streak == 2 -> Color(0xFF9C27B0) // Vivid Purple
@@ -108,6 +116,8 @@ fun GridBoard(
 
     val targetGlowColor = when {
         isBombMode -> Color(0xFFFF5722)
+        isColorBlastMode -> Color(0xFFE040FB)
+        isFeverMode -> Color(0xFFFF6D00)
         isHighScoreStreak -> Color(0xFFFFB300)
         streak >= 3 -> Color(0xFFFF1744)
         streak == 2 -> Color(0xFF7C4DFF)
@@ -137,12 +147,12 @@ fun GridBoard(
         label = "animGlowColor"
     )
 
-    val borderGlowWidth = if (streak > 0 || isHighScoreStreak) 2.5.dp else 1.5.dp
+    val borderGlowWidth = if (streak > 0 || isHighScoreStreak || isFeverMode || isColorBlastMode) 2.5.dp else 1.5.dp
 
     Box(
         modifier = modifier
             .shadow(
-                elevation = if (streak > 0 || isHighScoreStreak) 20.dp else 12.dp,
+                elevation = if (streak > 0 || isHighScoreStreak || isFeverMode || isColorBlastMode) 20.dp else 12.dp,
                 shape = RoundedCornerShape(16.dp),
                 spotColor = animGlowColor
             )
@@ -164,12 +174,21 @@ fun GridBoard(
                     val cellSizePx = bounds.width / 8f
                     onBoardPositioned(bounds, cellSizePx)
                 }
-                .pointerInput(gameState.selectedShapeIndex, gameState.isHammerActive, gameState.isBombActive) {
+                .pointerInput(
+                    gameState.selectedShapeIndex,
+                    gameState.isHammerActive,
+                    gameState.isBombActive,
+                    gameState.isColorBlastActive
+                ) {
                     detectTapGestures { offset ->
                         val cellSize = size.width / 8f
                         val col = (offset.x / cellSize).toInt().coerceIn(0, 7)
                         val row = (offset.y / cellSize).toInt().coerceIn(0, 7)
-                        if (gameState.selectedShapeIndex != null || gameState.isHammerActive || gameState.isBombActive) {
+                        if (gameState.selectedShapeIndex != null ||
+                            gameState.isHammerActive ||
+                            gameState.isBombActive ||
+                            gameState.isColorBlastActive
+                        ) {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
                         onCellTapped(row, col)
@@ -178,15 +197,15 @@ fun GridBoard(
         ) {
             val cellSize = maxWidth / 8f
 
-            // Subtle ambient radial glow when on a streak or multiplier
-            if (streak > 0 || isHighScoreStreak) {
+            // Subtle ambient radial glow when on a streak, fever mode, or multiplier
+            if (streak > 0 || isHighScoreStreak || isFeverMode) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .drawBehind {
                             drawCircle(
                                 brush = Brush.radialGradient(
-                                    colors = listOf(animGlowColor.copy(alpha = 0.16f), Color.Transparent),
+                                    colors = listOf(animGlowColor.copy(alpha = if (isFeverMode) 0.24f else 0.16f), Color.Transparent),
                                     radius = size.width * 0.75f
                                 )
                             )
@@ -218,7 +237,7 @@ fun GridBoard(
             }
 
             // Single shared pulse animation, instantiated only while a cell actually pulses
-            val needsTargetPulse = gameState.isHammerActive || gameState.isBombActive
+            val needsTargetPulse = gameState.isHammerActive || gameState.isBombActive || gameState.isColorBlastActive
             val needsProspectivePulse = gameState.prospectiveRows.isNotEmpty() || gameState.prospectiveCols.isNotEmpty()
             val sharedPulseAlpha: Float? = if (needsTargetPulse || needsProspectivePulse) {
                 val pulseTransition = rememberInfiniteTransition(label = "board_cell_pulse")
@@ -236,7 +255,7 @@ fun GridBoard(
                 null
             }
 
-            val stableEmptyTint = if (streak > 0 || isHighScoreStreak) targetGlowColor else null
+            val stableEmptyTint = if (streak > 0 || isHighScoreStreak || isFeverMode) targetGlowColor else null
 
             // 8x8 Grid Matrix rendered directly with Column/Row (avoids LazyVerticalGrid subcomposition overhead)
             Column(
@@ -260,6 +279,7 @@ fun GridBoard(
                             val isProspective = isRowProspective || gameState.prospectiveCols.contains(c)
                             val isHammerTarget = gameState.isHammerActive && colorId > 0
                             val isBombTarget = gameState.isBombActive && colorId > 0
+                            val isColorBlastTarget = gameState.isColorBlastActive && colorId > 0
                             val isGem = colorId > 0 && gameState.gemCells.isNotEmpty() && (r to c) in gameState.gemCells
                             val isLightning = colorId > 0 && gameState.lightningCells.isNotEmpty() && (r to c) in gameState.lightningCells
                             val iceLayers = if (colorId > 0 && gameState.iceCells.isNotEmpty()) {
@@ -267,7 +287,7 @@ fun GridBoard(
                             } else {
                                 0
                             }
-                            val cellPulse = if (isProspective || isHammerTarget || isBombTarget) {
+                            val cellPulse = if (isProspective || isHammerTarget || isBombTarget || isColorBlastTarget) {
                                 sharedPulseAlpha
                             } else {
                                 null
@@ -287,6 +307,7 @@ fun GridBoard(
                                     isProspectiveClear = isProspective,
                                     isHammerTarget = isHammerTarget,
                                     isBombTarget = isBombTarget,
+                                    isColorBlastTarget = isColorBlastTarget,
                                     isGem = isGem,
                                     isLightning = isLightning,
                                     iceLayers = iceLayers,
